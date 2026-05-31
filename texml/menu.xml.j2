@@ -1,7 +1,8 @@
 {#- Main IVR menu. Edit the wording / options freely; the next call uses it.
     Available variables: caller_name (or None), voice, base_url, menu_audio_url,
     ai_enabled (offer the AI-assistant option), announce_recording, action_url
-    (handle-input URL carrying the invalid-attempt counter). -#}
+    (handle-input URL carrying the attempt counter), reprompt_url (re-show the menu
+    with attempt+1 on no input; capped, then the call is closed). -#}
 <?xml version="1.0" encoding="UTF-8"?>
 <Response>
 {%- if announce_recording %}
@@ -14,6 +15,7 @@
     <Say voice="{{ voice }}">{% if caller_name %}Welcome back, {{ caller_name }}. {% endif %}Thank you for calling{% if company_name %} {{ company_name }}{% endif %}. For sales, press 1. For technical support, press 2. For billing or account questions, press 3. To speak with an operator, press 0.{% if ai_enabled %} Or to speak with our virtual assistant, press 4.{% endif %}</Say>
 {%- endif %}
   </Gather>
-  <Say voice="{{ voice }}">We did not receive a selection. Goodbye.</Say>
-  <Hangup/>
+  {#- No selection (the Gather timed out): re-show the menu (bounded by attempt);
+      once the cap is hit /texml/menu plays the closing message instead. -#}
+  <Redirect>{{ reprompt_url or (base_url ~ '/texml/menu') }}</Redirect>
 </Response>

@@ -212,8 +212,10 @@ department's ring chain, a raw PSTN/SIP dial, or `voicemail` (record). No option
 `<Redirect>`s back to /vm-option, which repeats the prompt up to BUSY_PROMPT_REPEATS
 plays (attempt index in the URL) then renders `closing.xml.j2` and hangs up — silence
 is treated as non-engagement, NOT voicemail (voicemail is the explicit `voicemail`
-option). The invalid-menu loop is separately capped by MAX_MENU_ATTEMPTS via an
-`?attempt=` index threaded menu -> handle-input -> invalid -> menu.
+option). The main menu behaves the same way: both no-input (the Gather times out and
+the menu `<Redirect>`s to itself with attempt+1) and invalid keypresses advance one
+`?attempt=` counter, capped at MAX_MENU_ATTEMPTS plays, then `/texml/menu` renders
+`closing.xml.j2` (close politely) — not voicemail.
 
 ## Resilience
 

@@ -343,13 +343,14 @@ async def initial_menu(request: Request):
             intro_text="Please hold while we connect you.",
         )
 
-    # Loop guard: too many invalid keypresses in a row -> stop re-prompting and
-    # take a message instead of looping the menu forever.
+    # Loop guard: too many no-input/invalid menu attempts -> stop re-prompting and
+    # close the call politely (a caller who never makes a valid choice is treated
+    # like the busy prompt's non-responder).
     attempt = int(request.query_params.get("attempt", "0") or 0)
     if attempt >= MAX_MENU_ATTEMPTS:
-        log.info("Menu giving up after %d invalid attempts: from=%s", attempt, From)
+        log.info("Menu giving up after %d attempts -> closing: from=%s", attempt, From)
         _logc("menu_giveup", company, frm=From, to=To, sid=CallSid, detail=str(attempt))
-        return _voicemail(company, "main", co)
+        return _render("closing.xml.j2", audio_url=prompt_audio("closing", company, co))
 
     contact = await lookup_caller(From)
     if contact:
@@ -369,7 +370,8 @@ async def initial_menu(request: Request):
                    menu_audio_url=_menu_audio(company, co),
                    ai_enabled=bool(_ai_assistant_id(company)),
                    announce_recording=settings.announce_recording,
-                   action_url=f"{settings.base_url}/texml/handle-input?attempt={attempt}")
+                   action_url=f"{settings.base_url}/texml/handle-input?attempt={attempt}",
+                   reprompt_url=f"{settings.base_url}/texml/menu?attempt={attempt + 1}")
 
 
 @router.post("/handle-input")

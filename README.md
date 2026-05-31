@@ -95,7 +95,7 @@ Telnyx ──webhook──► /texml/menu
 Telnyx ──webhook──► /texml/handle-input
       │   1/2/3/0 ─► ring that department's chain (below)
       │   4        ─► <Connect><AIAssistant>            (if an assistant is configured)
-      │   invalid  ─► re-prompt the menu, capped at 3 tries → then voicemail
+      │   no choice / invalid ─► re-prompt the menu, capped at 3 plays → then close politely
       ▼
    department ring chain  (resolved: routing.csv → companies.csv → env)
       SIP agents (ring together)
