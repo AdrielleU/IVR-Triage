@@ -46,6 +46,7 @@ app/security.py          # Telnyx Ed25519 signature verify + form parse
 app/routers/texml.py     # routing logic (renders templates, failover staging)
 app/services/contacts.py # caller match: local CSV first, optional HubSpot fallback
 app/services/schedule.py # business hours from CSV
+app/services/routing.py  # data/routing.csv roster -> ring stages per department
 app/services/hubspot.py  # HubSpot API (used by sync + optional live fallback)
 scripts/sync_hubspot.py  # download HubSpot contacts -> data/contacts.csv
 texml/                   # EDITABLE call XML (Jinja2, auto-reloaded)
@@ -107,6 +108,47 @@ voicemail (<Record>)
 ```
 
 Destinations are SIP URIs or PSTN numbers; multiple in a stage ring simultaneously.
+
+Where those destinations come from is resolved **first-hit-wins**:
+`data/routing.csv` (the agent roster, below) → `data/companies.csv` columns →
+the `*_AGENTS` / `*_FALLBACK` env vars. So you can adopt the roster gradually —
+departments without a routing row keep using your existing config.
+
+## Agent roster (`data/routing.csv`) — optional, recommended
+
+Instead of packing agents into `companies.csv` cells, keep a clean **one-row-per-
+person** roster. Copy `data/routing.example.csv` → `data/routing.csv`:
+
+```csv
+company,department,name,destination,extension,priority,active
+,sales,Alice,sip:alice@sip.telnyx.com,101,1,true
+,sales,Bob,sip:bob@sip.telnyx.com,102,1,true
+,sales,Sales cell (backup),+14155550102,,2,true
+,support,Carol,sip:carol@sip.telnyx.com,201,1,true
+,support,AI Support Bot,assistant-776d0d6f,,2,true
+18005550001,sales,Acme Alice,sip:acme-alice@sip.telnyx.com,201,1,true
+```
+
+- **`company`** — blank = default/single-tenant; or the dialed number for a
+  specific tenant (matched on the last 10 digits).
+- **`department`** — `sales` / `support` / `billing` / `operator` / `after_hours`.
+- **`destination`** — a SIP URI, a PSTN number, **or a Telnyx AI Assistant id**
+  (`assistant-…`). Type is inferred from the value.
+- **`priority`** — ring order: same number = ring together; higher = later
+  fail-over stage. (Above: Sales rings Alice + Bob, then the cell.)
+- **`extension`** — a label for now (reserved for future dial-by-extension).
+- **`active`** — `false` benches someone without deleting the row.
+
+**AI assistants are just another destination.** A row whose `destination` is an
+`assistant-…` id is handed the call via `<Connect><AIAssistant>` on the same leg
+(no extra telephony leg). So Support above rings Carol first and, if she doesn't
+answer, **fails over to an AI assistant** before voicemail — and each
+company/department can point at a *different* assistant. (This is separate from
+the global "press 4" handoff; both can coexist.) Give an assistant its own
+`priority` — it's a terminal stage, not something to ring alongside a human.
+
+`data/routing.csv` is gitignored (your internal numbers); `routing.example.csv`
+is the template. Edits apply on the next call — no restart.
 
 ## Run
 

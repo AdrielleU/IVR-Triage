@@ -1,0 +1,10 @@
+company,department,name,destination,extension,priority,active
+,sales,Alice,sip:alice@sip.telnyx.com,101,1,true
+,sales,Bob,sip:bob@sip.telnyx.com,102,1,true
+,sales,Sales cell (backup),+14155550102,,2,true
+,support,Carol,sip:carol@sip.telnyx.com,201,1,true
+,support,AI Support Bot,assistant-776d0d6f-716d-4d8f-b6da-b95181636838,,2,true
+,billing,Dana,sip:dana@sip.telnyx.com,301,1,true
+,operator,Front Desk,sip:frontdesk@sip.telnyx.com,100,1,true
+18005550001,sales,Acme Alice,sip:acme-alice@sip.telnyx.com,201,1,true
+18005550001,support,Acme AI Bot,assistant-9f1c2a30-aaaa-bbbb-cccc-1234567890ab,,1,true

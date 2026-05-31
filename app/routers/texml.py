@@ -12,6 +12,7 @@ from app.security import verified_form
 from app.services.companies import get_company, normalize
 from app.services.contacts import lookup_caller
 from app.services.recordings import process_recording
+from app.services.routing import get_stages
 from app.services.schedule import is_open
 
 router = APIRouter()
@@ -74,23 +75,30 @@ def _ai_assistant_id(company: dict | None) -> str:
     return (company.get("ai_assistant_id") if company else "") or settings.ai_assistant_id
 
 
-def _connect_ai(company: dict | None) -> Response:
-    """Attach the AI Assistant to the CURRENT leg. No new <Dial> leg, no $0.10
-    transfer fee — only the AI minute stacks on the single inbound leg."""
+def _connect_ai(assistant_id: str) -> Response:
+    """Attach an AI Assistant to the CURRENT leg. No new <Dial> leg — only the AI
+    minute stacks on the single inbound leg. Used by the press-4 handoff and by a
+    routing.csv `assistant-...` destination."""
     return _render(
         "connect-ai.xml.j2",
-        assistant_id=_ai_assistant_id(company),
+        assistant_id=assistant_id,
         intro_audio_url=settings.ai_intro_audio_url,
         intro_text="Connecting you to our virtual assistant. One moment please.",
     )
 
 
-def _stages(company: dict | None, dept_key: str) -> list[list[str]]:
-    """Ordered ring stages for a department: agents first, then PSTN fallback.
+def _stages(company: dict | None, dept_key: str, co: str = "") -> list[list[str]]:
+    """Ordered ring stages for a department.
 
-    Per-company values come from companies.csv; if no company matched the dialed
-    number, fall back to the single-tenant env config (<KEY>_agents/_fallback).
+    Resolution order, first hit wins: data/routing.csv (per-agent roster, keyed by
+    the company `co`) -> data/companies.csv columns -> single-tenant env config
+    (<KEY>_agents then <KEY>_fallback). Each stage is a list of destinations
+    (SIP URI / PSTN number / assistant id) that ring together; later stages are
+    fail-over.
     """
+    routed = get_stages(co, dept_key)
+    if routed is not None:
+        return routed
     if company is not None:
         agents = _split(company.get(f"{dept_key}_agents", ""))
         fallback = _split(company.get(f"{dept_key}_fallback", ""))
@@ -117,9 +125,15 @@ def _dial_stage(company: dict | None, dept_key: str, stage: int, co: str) -> Res
     company key (`co`), so a no-answer fails over to the next stage for the right
     company even if the callback omits the dialed number.
     """
-    stages = _stages(company, dept_key)
+    stages = _stages(company, dept_key, co)
     if stage >= len(stages):
         return _voicemail(dept_key, co) if settings.enable_voicemail else _render("goodbye.xml.j2")
+    # An AI-assistant destination is terminal: <Connect> it to THIS leg instead of
+    # opening a new <Dial> leg. Give an assistant its own priority/stage; if a stage
+    # mixes one in, the assistant wins (you wouldn't ring a human and an AI at once).
+    assistant = next((d for d in stages[stage] if d.startswith("assistant-")), None)
+    if assistant:
+        return _connect_ai(assistant)
     return _render(
         "transfer.xml.j2",
         department=LABELS.get(dept_key, "us"),
@@ -143,7 +157,7 @@ async def initial_menu(request: Request):
 
     if not is_open():
         log.info("After-hours call: from=%s to=%s call_sid=%s", From, To, CallSid)
-        if _stages(company, "after_hours"):
+        if _stages(company, "after_hours", co):
             return _dial_stage(company, "after_hours", 0, co)
         return _render(
             "after_hours.xml.j2",
@@ -183,14 +197,14 @@ async def handle_input(request: Request):
     # AI handoff: <Connect> the assistant onto this leg instead of <Dial>ing out.
     if digit == AI_DIGIT and _ai_assistant_id(company):
         log.info("Connecting caller to AI assistant: from=%s company=%r", From, _company_name(company))
-        return _connect_ai(company)
+        return _connect_ai(_ai_assistant_id(company))
 
     dept = DEPARTMENTS.get(digit)
     if dept is None:
         return _render("invalid.xml.j2")
 
     _, key = dept
-    if not _stages(company, key):
+    if not _stages(company, key, co):
         # Nobody configured for this option — take a message instead of dropping.
         return _voicemail(key, co, template="unavailable.xml.j2")
 

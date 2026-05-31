@@ -32,6 +32,8 @@ wheels/
 data/contacts.csv
 # Per-company routing (your internal agent numbers). Copy from companies.example.csv.
 data/companies.csv
+# Agent roster (your internal SIP/PSTN/assistant destinations). Copy from routing.example.csv.
+data/routing.csv
 
 # Call/voicemail recordings + transcripts (customer PII) — keep the folder, not its contents.
 recordings/*

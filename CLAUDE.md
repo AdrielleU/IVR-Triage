@@ -44,6 +44,7 @@ app/routers/texml.py     # routing logic; renders templates; failover staging
 app/services/contacts.py # caller match: local CSV first, optional HubSpot fallback
 app/services/schedule.py # business hours from data/hours.csv + holidays.csv
 app/services/datafiles.py# mtime-cached CSV loader
+app/services/routing.py  # data/routing.csv roster -> ordered ring stages per dept
 app/services/hubspot.py  # HubSpot API (sync script + optional live fallback)
 scripts/sync_hubspot.py  # HubSpot contacts -> data/contacts.csv
 texml/*.xml.j2           # EDITABLE call XML (Jinja2, auto_reload=True)
@@ -64,10 +65,26 @@ Operational data lives in editable files, not code: `data/contacts.csv`
 Public holidays are computed by the `holidays` lib (`HOLIDAY_COUNTRY`/`SUBDIV`,
 correct floating/observed dates per year); `data/holidays.csv` is ONLY for
 company-specific closures on top. Don't hard-code standard holidays. Both `texml/` and `data/` are volume-mounted in compose so
-edits apply with no restart. Routing fails over in stages: `<KEY>_agents` (SIP)
--> `<KEY>_fallback` (PSTN) -> voicemail, advanced by /texml/after-dial on a
-non-`completed` DialCallStatus. Caller match is local-CSV-first; the HubSpot API
-is only touched by the sync script or when HUBSPOT_LIVE_FALLBACK is on.
+edits apply with no restart. Routing fails over in stages, advanced by
+/texml/after-dial on a non-`completed` DialCallStatus, ending in voicemail.
+A department's stages are resolved by `_stages()` first-hit-wins:
+`data/routing.csv` (per-agent roster) -> `data/companies.csv` columns ->
+`<KEY>_agents`/`<KEY>_fallback` env. Caller match is local-CSV-first; the HubSpot
+API is only touched by the sync script or when HUBSPOT_LIVE_FALLBACK is on.
+
+`data/routing.csv` (`app/services/routing.py`) is the top routing layer — one row
+per destination: `company,department,name,destination,extension,priority,active`.
+Rows with the same `priority` ring together; higher priorities are later
+fail-over stages. A `destination` is a SIP URI, a PSTN number, OR a Telnyx AI
+Assistant id (`assistant-...`). An assistant destination is **terminal**: in
+`_dial_stage` it renders `<Connect><AIAssistant>` on the current leg (no new
+`<Dial>` leg) rather than a transfer — so a department can ring humans first and
+fail over to an AI assistant before voicemail, and different tenants/departments
+can point at different assistants. `company` blank = default/single-tenant, else
+the dialed number (last-10-digit key). No routing.csv -> companies.csv/env as
+before. `data/routing.csv` is gitignored (internal numbers); ship from
+`routing.example.csv`. `extension` is reserved for a future dial-by-extension
+feature; today it's a label.
 
 All call XML lives in `texml/` templates, rendered with Jinja2 (`auto_reload`,
 `autoescape` on). Routing/business-hours/CRM/signature logic stays in Python;
