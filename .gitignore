@@ -34,6 +34,8 @@ data/contacts.csv
 data/companies.csv
 # Agent roster (your internal SIP/PSTN/assistant destinations). Copy from routing.example.csv.
 data/routing.csv
+# Busy-prompt keypress options (your internal destinations). Copy from options.example.csv.
+data/options.csv
 
 # Call/voicemail recordings + transcripts (customer PII) — keep the folder, not its contents.
 recordings/*

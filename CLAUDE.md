@@ -202,6 +202,15 @@ and assign your number to it.
   recordings/) via app/services/calllog.py — durable, queryable selection history.
   JSON-Lines (append-safe, human-readable); best-effort writes never break a call.
 
+Busy-prompt options: at the busy/voicemail prompt, `data/options.csv`
+(`app/services/options.py`, context "busy": company,context,digit,label,destination)
+offers "press <digit> for <label>" before the beep. `/texml/vm-option` dispatches a
+press via `_route_to`: a destination resolves to an AI assistant (`ai`/`assistant-…`),
+a department's ring chain, or a raw PSTN/SIP dial (-> voicemail). No options.csv ->
+default press-1->AI when an assistant is configured. No/unmapped keypress falls
+through to `<Record>`. The invalid-menu loop is capped by MAX_MENU_ATTEMPTS via an
+`?attempt=` index threaded menu -> handle-input -> invalid -> menu.
+
 ## Resilience
 
 - `/health` returns 503 (not 200) when the app can't serve calls (templates

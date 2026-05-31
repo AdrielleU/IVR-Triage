@@ -1,16 +1,17 @@
 {#- Voicemail capture. Plays a prompt, beeps, records, then hangs up.
     Telnyx posts the recording to /texml/recording when the call ends.
-    When ai_action is set, the prompt is wrapped in a <Gather> offering "press 1
-    for the AI assistant"; no keypress falls through to the <Record> below.
-    Variables: department, dept_key, max_seconds, voice, base_url, audio_url, ai_action. -#}
+    When options are configured, the prompt is wrapped in a <Gather> offering
+    "for <label>, press <digit>"; no keypress falls through to the <Record> below.
+    Variables: department, dept_key, max_seconds, voice, base_url, audio_url,
+    options (list of {digit,label}), option_action. -#}
 <?xml version="1.0" encoding="UTF-8"?>
 <Response>
-{%- if ai_action %}
-  <Gather numDigits="1" timeout="6" action="{{ ai_action }}" method="POST">
+{%- if option_action %}
+  <Gather numDigits="1" timeout="6" action="{{ option_action }}" method="POST">
   {%- if audio_url %}
     <Play>{{ audio_url }}</Play>
   {%- else %}
-    <Say voice="{{ voice }}">Sorry, no one is available{% if department and department != 'us' %} in {{ department }}{% endif %} right now. To speak with our virtual assistant, press 1. Or leave a message after the beep, then press pound or hang up.</Say>
+    <Say voice="{{ voice }}">Sorry, no one is available{% if department and department != 'us' %} in {{ department }}{% endif %} right now. {% for o in options %}For {{ o.label }}, press {{ o.digit }}. {% endfor %}Or leave a message after the beep, then press pound or hang up.</Say>
   {%- endif %}
   </Gather>
 {%- elif audio_url %}

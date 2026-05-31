@@ -438,11 +438,21 @@ Controls:
 - `VOICEMAIL_MAX_SECONDS=120` — max message length (billed as plain telephony time).
 - To use a **recorded voicemail prompt** instead of TTS, drop an
   `audio/voicemail.mp3` clip — see *Recorded prompts* below.
-- **"Press 1 for the AI assistant" escape hatch.** When a department is busy/unstaffed
-  *and* an AI assistant is configured for the tenant, the busy and voicemail prompts
-  automatically add "…or press 1 to speak with our virtual assistant." Press 1 →
-  `<Connect><AIAssistant>`; no keypress → records as normal. It appears only when an
-  assistant is configured (no extra flag), and a non-1 key just records (no loop).
+- **Configurable busy-prompt options (`data/options.csv`).** When a department is
+  busy/unstaffed, the prompt can offer "for *X*, press 1; for *Y*, press 2…" before
+  falling through to voicemail. One row per option:
+  ```csv
+  company,context,digit,label,destination,active
+  ,busy,1,our virtual assistant,ai,true
+  ,busy,2,the operator,operator,true
+  ,busy,3,our answering service,+18005559999,true
+  ```
+  A `destination` is `ai` (the configured assistant), an `assistant-…` id, a
+  **department** key (rings that chain), a **PSTN number**, or a **SIP URI**. Press
+  a configured key → it routes there; **no keypress → beep + record** (voicemail);
+  an unmapped key → record. Add rows to add keys. With no `options.csv`, the default
+  is "press 1 = AI assistant" when one is configured (else straight to voicemail).
+  `options.csv` is gitignored — ship from `options.example.csv`.
 
 Where messages go: Telnyx records and **stores every voicemail on Telnyx** (Portal
 → Reporting → Recordings, or via API). To also keep them locally with transcripts,
