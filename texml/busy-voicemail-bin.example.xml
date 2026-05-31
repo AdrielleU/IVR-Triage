@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  "Operators busy -> leave a voicemail" bin.
+
+  Paste into a Telnyx TeXML Bin (Voice -> TeXML -> Create TeXML Bin). Use it as
+  the TeXML Application Failover URL, or as a department's destination, so callers
+  can always leave a message even when your app/agents are unavailable.
+
+  Telnyx records the message and STORES it on Telnyx automatically — you can find
+  every recording in Mission Control -> Reporting -> Recordings, fetch them via the
+  Recordings API, or have them pushed to recordingStatusCallback below (your app
+  logs the URL at /texml/recording). The recording happens whether or not that
+  callback succeeds, so voicemails are never lost.
+
+  Replace YOUR_BASE_URL with your public host (e.g. ivr.yourdomain.com). If you
+  don't want the callback, delete the recordingStatusCallback attribute entirely —
+  recordings still land in the Telnyx portal.
+-->
+<Response>
+  <Say voice="Polly.Joanna-Neural">Hi! All of our phone operators are busy right now. Please leave a voicemail after the beep and we will hear it and get back to you. Press the pound key when you are finished.</Say>
+  <Record maxLength="180"
+          finishOnKey="#"
+          playBeep="true"
+          recordingStatusCallback="https://YOUR_BASE_URL/texml/recording" />
+  <Say voice="Polly.Joanna-Neural">Thank you. We have your message. Goodbye.</Say>
+  <Hangup/>
+</Response>

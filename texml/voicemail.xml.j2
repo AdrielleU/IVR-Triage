@@ -1,0 +1,12 @@
+{#- Voicemail capture. Plays a prompt, beeps, records, then hangs up.
+    Telnyx posts the recording to /texml/recording when the call ends.
+    Variables: department, dept_key, max_seconds, voice, base_url. -#}
+<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say voice="{{ voice }}">Sorry, no one is available in {{ department }} right now. Please leave a message after the beep, then press pound or hang up.</Say>
+  <Record maxLength="{{ max_seconds }}" finishOnKey="#" playBeep="true"
+          action="{{ base_url }}/texml/voicemail-done?dept={{ dept_key }}" method="POST"
+          recordingStatusCallback="{{ base_url }}/texml/recording?dept={{ dept_key }}" />
+  <Say voice="{{ voice }}">We did not receive a message. Goodbye.</Say>
+  <Hangup/>
+</Response>

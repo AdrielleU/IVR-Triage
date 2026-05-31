@@ -1,0 +1,7 @@
+{#- Caller pressed a key with no menu option. Re-prompts once; the menu's own
+    timeout caps any loop. Variables: voice, base_url. -#}
+<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say voice="{{ voice }}">That was not a valid option.</Say>
+  <Redirect>{{ base_url }}/texml/menu</Redirect>
+</Response>

@@ -1,0 +1,9 @@
+{#- Shared partial: render each destination as <Sip> or <Number>. Included by
+    other templates with a `destinations` list in context. Don't call directly. -#}
+{%- for d in destinations %}
+{%- if d.startswith('sip:') %}
+    <Sip>{{ d }}</Sip>
+{%- else %}
+    <Number>{{ d }}</Number>
+{%- endif %}
+{%- endfor %}

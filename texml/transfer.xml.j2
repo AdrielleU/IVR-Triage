@@ -1,0 +1,10 @@
+{#- Rings one stage's destinations. If none answer within dial_timeout, the
+    action callback (/texml/after-dial) fails over to the next stage or voicemail.
+    Variables: department, destinations[], dial_timeout, action_url, voice. -#}
+<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say voice="{{ voice }}">Connecting you to {{ department }}. Please hold.</Say>
+  <Dial timeout="{{ dial_timeout }}" action="{{ action_url }}" method="POST"{% if record_calls %} record="record-from-answer" recordingStatusCallback="{{ recording_callback }}"{% endif %}>
+{%- include "_dial.xml.j2" %}
+  </Dial>
+</Response>

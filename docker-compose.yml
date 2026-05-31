@@ -1,0 +1,64 @@
+# Telnyx IVR — run it:
+#   docker compose up -d --build                 # app only (expose with your own tunnel/ngrok)
+#   docker compose --profile tunnel up -d --build # app + Cloudflare Tunnel (TUNNEL_TOKEN in .env)
+#   docker compose logs -f ivr                   # watch call logs
+#
+# VOLUMES — three things are mounted from the host so you can change them WITHOUT
+# rebuilding the image:
+#   ./texml       IVR / voicemail XML templates   (read-only; edit -> next call uses it)
+#   ./data        contacts.csv, hours.csv, holidays.csv  (read-only; edit/upload freely)
+#   ./recordings  saved audio + transcripts + index.csv  (read-write; the app writes here)
+#
+# These are "bind mounts" (a host folder mapped into the container) — the simplest
+# kind of local volume, and what you want here because you edit/read these files
+# directly on the host. A named-volume alternative for recordings is shown at the
+# bottom if you'd rather let Docker manage that storage.
+
+services:
+  ivr:
+    build:
+      context: .
+      # Bake in local transcription (faster-whisper) at build time:
+      # args:
+      #   INSTALL_TRANSCRIBE: "true"
+    env_file: .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./texml:/app/texml:ro          # templates  (ro = container can't modify them)
+      - ./data:/app/data:ro            # CSV data   (ro)
+      - ./recordings:/app/recordings   # recordings (rw — must be writable)
+      # If the app can't write to ./recordings (permission denied), the container
+      # user is uid 1000; either `chown -R 1000 recordings` on the host, or switch
+      # to the named volume shown at the bottom of this file.
+    restart: unless-stopped
+    healthcheck:
+      # Marks the container unhealthy if /health isn't 200 (it returns 503 when the
+      # app can't serve calls), so `restart: unless-stopped` brings it back.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  # Optional: publish the app via Cloudflare Tunnel instead of opening a port.
+  # Create a tunnel in the Cloudflare Zero Trust dashboard, point its public
+  # hostname at http://ivr:8000, put its token in .env as TUNNEL_TOKEN, then:
+  #   docker compose --profile tunnel up -d
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN}
+    depends_on:
+      - ivr
+    restart: unless-stopped
+    profiles:
+      - tunnel
+
+# ── Named-volume alternative for recordings ──────────────────────────────────
+# Docker-managed storage (no host-permission headaches). To use it instead of the
+# bind mount above: swap `./recordings:/app/recordings` for `recordings:/app/recordings`,
+# then uncomment this block. Inspect files with: docker compose exec ivr ls recordings
+# volumes:
+#   recordings:

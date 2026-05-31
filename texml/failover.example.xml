@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  BACKUP / FAILOVER instructions for when THIS app (or its Cloudflare tunnel) is
+  unreachable. Do NOT serve this from your own server — that defeats the purpose.
+
+  Setup:
+    1. Telnyx Portal -> Voice -> TeXML -> create a "TeXML Bin", paste this in.
+       (A TeXML Bin is hosted ON Telnyx, so it stays up even if your app is down.)
+    2. Replace +1XXXXXXXXXX with a real backup line (an owner's cell, an answering
+       service, etc.).
+    3. On your TeXML Application, set the "Failover URL" to this Bin's URL.
+
+  Now if Telnyx can't get a 200 from your primary webhook, it falls back here and
+  the caller is still answered and forwarded instead of hearing dead air.
+-->
+<Response>
+  <Say voice="Polly.Joanna-Neural">Thanks for calling. Please hold while we connect you.</Say>
+  <Dial timeout="25">
+    <Number>+1XXXXXXXXXX</Number>
+  </Dial>
+  <Say voice="Polly.Joanna-Neural">Sorry, we are unable to take your call right now. Please try again in a few minutes.</Say>
+  <Hangup/>
+</Response>

@@ -1,0 +1,5 @@
+date,note
+# Standard public holidays are computed automatically (HOLIDAY_COUNTRY/SUBDIV),
+# so you do NOT list them here. Use this file only for company-specific closures
+# that the calendar can't know about. Format: YYYY-MM-DD,note
+2026-08-14,Company offsite

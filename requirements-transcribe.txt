@@ -1,0 +1,4 @@
+# Optional: local transcription. Install only if TRANSCRIBE_ENABLED=true.
+#   pip install -r requirements-transcribe.txt
+# Kept out of the main requirements so the base image stays small.
+faster-whisper>=1.0.0
