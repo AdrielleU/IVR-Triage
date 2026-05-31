@@ -85,21 +85,53 @@ matching, business hours, recording, the optional AI handoff).
 Caller dials your number
       │
       ▼
-Telnyx ──webhook──► /texml/menu        (business-hours check, contacts.csv lookup, greeting + DTMF)
+Telnyx ──webhook──► /texml/menu
+      │   1. Business hours?  ── closed ──► after-hours: on-call line, else voicemail
+      │   2. Direct line?  (a `direct` ring chain configured for this number)
+      │         └─ yes ──► play greeting, auto-ring SIP → personal line → voicemail   (NO menu)
+      │   3. Otherwise: match caller in contacts.csv, play greeting + DTMF menu
       │  caller presses a key
       ▼
-Telnyx ──webhook──► /texml/handle-input   (rings that department's agents via <Dial>)
-      │  no one answers (or none configured)
+Telnyx ──webhook──► /texml/handle-input
+      │   1/2/3/0 ─► ring that department's chain (below)
+      │   4        ─► <Connect><AIAssistant>            (if an assistant is configured)
+      │   invalid  ─► re-prompt the menu, capped at 3 tries → then voicemail
       ▼
-Telnyx ──webhook──► /texml/after-dial  ──► voicemail (<Record>) ──► /texml/recording (URL logged)
-
-      (optional) caller presses 4
-      ▼
-/texml/handle-input ──► <Connect><AIAssistant>   (assistant on the SAME leg; no <Dial>, no extra leg/fee)
+   department ring chain  (resolved: routing.csv → companies.csv → env)
+      SIP agents (ring together)
+        │ no answer / offline        ── via /texml/after-dial, one stage at a time
+        ▼
+      PSTN fallback (cell, etc.)
+        │ no answer
+        ▼
+      AI assistant in the chain?  ── `ai` / `assistant-…` destination ──► <Connect><AIAssistant>
+        │ (else)
+        ▼
+   busy / voicemail prompt        (data/options.csv "busy" options)
+        ├─ press 1/2/0/…  ─► route to AI · a department · a number · voicemail
+        ├─ no keypress    ─► repeat up to BUSY_PROMPT_REPEATS, then "thank you, please
+        │                    call again" + hang up   (closing.xml.j2)
+        └─ (no options set) ─► leave a message after the beep
+                                 │
+                                 ▼
+                    voicemail <Record> ──► /texml/voicemail-done
+                                       ──► /texml/recording  (URL logged; saved if SAVE_RECORDINGS)
 ```
+
+The agent's phone shows the caller as **`LABEL-GRP-Who`** (e.g. `RAV-SUP-Jane Doe`,
+or the caller's number if they aren't in `contacts.csv`). Every billable routing
+step is bounded — failover climbs a finite stage list, the menu caps invalid
+re-tries, and the busy prompt caps repeats — so no path loops. With `LOG_CALLS=true`
+each step is appended to a JSON-Lines call log for history.
 
 Audio (SIP/RTP) flows **between the agents' softphones and Telnyx** — it never
 touches this app or your network. The app only ever returns small XML documents.
+
+> **One deployment, many numbers.** Everything above is keyed by the *dialed*
+> number (`To`): `data/companies.csv` gives each number its own name, label,
+> greeting, agents, and assistant; `data/routing.csv` and `data/options.csv` add
+> per-number ring chains and busy options. Numbers not listed fall back to the
+> single-tenant `.env` config. See the sections below.
 
 ## Layout
 
@@ -143,20 +175,26 @@ Application can serve many companies. Copy `data/companies.example.csv` →
 `data/companies.csv` and list each number:
 
 ```csv
-number,name,menu_audio_url,ai_assistant_id,sales_agents,support_agents,billing_agents,operator_agents,sales_fallback,...
-+18005550001,Acme Inc,,,sip:acme1@sip.telnyx.com;sip:acme2@sip.telnyx.com,sip:acme1@sip.telnyx.com,+1...,+1...,+1...
-+18005550002,Globex,https://cdn/globex.mp3,assistant-776d…,sip:globex1@sip.telnyx.com,...
+number,name,label,ai_assistant_id,menu_audio_url,sales_agents,support_agents,billing_agents,operator_agents,sales_fallback,...
++18005550001,Acme Inc,ACM,,,sip:acme1@sip.telnyx.com;sip:acme2@sip.telnyx.com,sip:acme1@sip.telnyx.com,+1...,+1...,+1...
++18005550002,Globex,GLX,assistant-globex-0001,https://cdn/globex.mp3,sip:globex1@sip.telnyx.com,...
 ```
 
-Each company gets its own greeting (its `name` in the TTS prompt, or its own
-`menu_audio_url` recording), an optional per-company `ai_assistant_id` (enables
-that company's "press 4" AI handoff), and its own per-department agents/failover.
-Multiple
-agents in one cell are separated by `;`. A call to a listed number uses that
-company's row; an unlisted number falls back to the single-tenant `*_AGENTS` env
-vars. Recordings are tagged with the company (filename + `index.csv` column).
-Adding a company is a CSV edit — no redeploy. `data/companies.csv` is gitignored
-(internal routing); `companies.example.csv` is the template.
+Each company gets its own `name` (spoken in the greeting), `label` (the agent's
+`LABEL-GRP-Who` caller-ID prefix), an optional `menu_audio_url` recording, an
+optional per-company `ai_assistant_id` (its "press 4" / `ai` handoff target), and
+its own per-department agents/failover. Columns are matched by name, so order is
+flexible and you can omit ones you don't use. Multiple agents in one cell are
+separated by `;`. A call to a listed number uses that company's row; an unlisted
+number falls back to the single-tenant `.env` config. Recordings and the call log
+are tagged with the company. Adding a company is a CSV edit — no redeploy.
+`data/companies.csv` is gitignored (internal routing); `companies.example.csv` is
+the template.
+
+The other per-number files follow the same pattern (blank `company` = default,
+else the dialed number): **`data/routing.csv`** (ring chains / `ai` / direct
+lines — see below), **`data/options.csv`** (busy-prompt keypress options), and the
+shared **`data/contacts.csv`** / **`hours.csv`** / **`holidays.csv`**.
 
 ## Caller routing & failover
 
