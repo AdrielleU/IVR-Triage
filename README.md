@@ -646,3 +646,40 @@ and tunnel self-heal after a crash.
   break signature verification).
 - Voicemail hold/record time is billed at the plain telephony rate — keep
   `VOICEMAIL_MAX_SECONDS` and `DIAL_TIMEOUT` sane.
+
+## Common pitfalls (read before going live)
+
+**Config traps:**
+- **`BASE_URL` must be your real public URL, not `localhost`.** Every callback,
+  `<Play>` clip, and re-prompt is built from it; with `localhost` Telnyx can't reach
+  anything and calls break after the first prompt. ← the #1 mistake.
+- **Edit the *real* CSVs, not the `*.example.csv`.** `companies.csv`, `routing.csv`,
+  and `options.csv` are gitignored — copy the example to the real name first.
+  Editing the example does nothing.
+- **`AI_ASSISTANT_ID` must be a real Telnyx assistant id** (looks like
+  `assistant-…`). The shipped placeholder fails the call. Used by press-4, the `ai`
+  routing destination, and the busy-prompt `ai` option.
+- **Multiple agents in one `companies.csv` cell are separated by `;`**, not `,`
+  (a comma breaks the CSV). `routing.csv` uses one row per agent instead.
+- **`RECORD_CALLS=true` needs `ANNOUNCE_RECORDING=true`** in all-party-consent
+  jurisdictions — the disclosure must play before recording.
+- **`TRANSCRIBE_ENABLED=true` needs the bigger image** (`--build-arg
+  INSTALL_TRANSCRIBE=true`); otherwise transcription is silently skipped (audio is
+  still saved).
+- **Set the Telnyx Application Failover URL** to a hosted bin
+  (`texml/busy-voicemail-bin.example.xml`) — it's the only thing covering a total
+  outage of this app.
+
+**Behavior to be deliberate about:**
+- **Silence now closes the call, it does not record.** A caller who never presses
+  a key — at the main menu *or* a busy prompt with options — is re-prompted a few
+  times, then hears "thank you, please call again" and is hung up (anti-spam). **A
+  legit but slow caller won't leave a voicemail this way.** If you want a safety
+  net, give the busy prompt an explicit `voicemail` option (e.g. press 0 in
+  `options.csv`), and remember the main menu's `0` already reaches the operator.
+- **`ENABLE_VOICEMAIL=false` means no message is ever taken** — unanswered calls
+  end at a polite goodbye, not a recording.
+- **Whoever isn't in `contacts.csv` shows as their number** (`RAV-SUP-5551234567`)
+  to the agent — that's expected, not a bug.
+- **`AI_ASSISTANT_ID` set = "press 4" appears on the menu.** Remove it to drop the
+  option entirely.
