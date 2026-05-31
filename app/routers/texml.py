@@ -97,6 +97,24 @@ def _ai_assistant_id(company: dict | None) -> str:
     return (company.get("ai_assistant_id") if company else "") or settings.ai_assistant_id
 
 
+# Routing destinations that mean "the configured AI assistant" rather than a dialable
+# SIP/PSTN endpoint. The "ai" sentinel resolves to the tenant's ai_assistant_id, so a
+# routing row never has to hard-code the raw id (and can't break on its format).
+_AI_SENTINELS = {"ai", "assistant", "ai-assistant"}
+
+
+def _assistant_for(dest: str, company: dict | None) -> str | None:
+    """The AI assistant id a routing destination refers to, or None if it's a normal
+    dialable destination. Accepts a literal "assistant-…" id or the "ai" sentinel
+    (which resolves to the tenant's configured id; None if none is configured)."""
+    d = (dest or "").strip()
+    if d.startswith("assistant-"):
+        return d
+    if d.lower() in _AI_SENTINELS:
+        return _ai_assistant_id(company) or None
+    return None
+
+
 def _connect_ai(assistant_id: str) -> Response:
     """Attach an AI Assistant to the CURRENT leg. No new <Dial> leg — only the AI
     minute stacks on the single inbound leg. Used by the press-4 handoff and by a
@@ -201,13 +219,23 @@ def _dial_stage(company: dict | None, dept_key: str, stage: int, co: str,
     # An AI-assistant destination is terminal: <Connect> it to THIS leg instead of
     # opening a new <Dial> leg. Give an assistant its own priority/stage; if a stage
     # mixes one in, the assistant wins (you wouldn't ring a human and an AI at once).
-    assistant = next((d for d in stages[stage] if d.startswith("assistant-")), None)
-    if assistant:
-        return _connect_ai(assistant)
+    # A destination is an assistant if it's a literal "assistant-…" id or the "ai"
+    # sentinel resolved to the tenant's configured id.
+    for dest in stages[stage]:
+        assistant = _assistant_for(dest, company)
+        if assistant:
+            return _connect_ai(assistant)
+    # Drop any AI sentinels we couldn't resolve (e.g. "ai" with no assistant configured)
+    # so we never <Dial> a literal "ai"; an emptied stage falls over to the next one.
+    dialable = [d for d in stages[stage] if d.strip().lower() not in _AI_SENTINELS]
+    if not dialable:
+        return _dial_stage(company, dept_key, stage + 1, co, caller_name=caller_name,
+                           caller_number=caller_number, intro_audio_url=intro_audio_url,
+                           intro_text=intro_text)
     return _render(
         "transfer.xml.j2",
         department=LABELS.get(dept_key, "us"),
-        destinations=stages[stage],
+        destinations=dialable,
         dial_timeout=settings.dial_timeout,
         from_display=_from_display(company, dept_key, caller_name, caller_number),
         action_url=f"{settings.base_url}/texml/after-dial?dept={dept_key}&stage={stage}&co={co}",

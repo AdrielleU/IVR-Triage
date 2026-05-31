@@ -82,10 +82,13 @@ greeting reuses the per-prompt audio convention (`audio/<co>/menu.mp3`).
 `data/routing.csv` (`app/services/routing.py`) is the top routing layer — one row
 per destination: `company,department,name,destination,extension,priority,active`.
 Rows with the same `priority` ring together; higher priorities are later
-fail-over stages. A `destination` is a SIP URI, a PSTN number, OR a Telnyx AI
-Assistant id (`assistant-...`). An assistant destination is **terminal**: in
-`_dial_stage` it renders `<Connect><AIAssistant>` on the current leg (no new
-`<Dial>` leg) rather than a transfer — so a department can ring humans first and
+fail-over stages. A `destination` is a SIP URI, a PSTN number, a Telnyx AI
+Assistant id (`assistant-...`), or the `ai` sentinel — `_assistant_for()` resolves
+both `assistant-…` and `ai`/`assistant`/`ai-assistant` (the latter -> the tenant's
+configured `ai_assistant_id`, so a row needn't hard-code the raw id; an unresolved
+sentinel is dropped and the stage falls over). An assistant destination is
+**terminal**: in `_dial_stage` it renders `<Connect><AIAssistant>` on the current
+leg (no new `<Dial>` leg) rather than a transfer — so a department can ring humans first and
 fail over to an AI assistant before voicemail, and different tenants/departments
 can point at different assistants. `company` blank = default/single-tenant, else
 the dialed number (last-10-digit key). No routing.csv -> companies.csv/env as

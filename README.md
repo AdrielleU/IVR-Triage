@@ -240,20 +240,26 @@ company,department,name,destination,extension,priority,active
 - **`company`** — blank = default/single-tenant; or the dialed number for a
   specific tenant (matched on the last 10 digits).
 - **`department`** — `sales` / `support` / `billing` / `operator` / `after_hours`.
-- **`destination`** — a SIP URI, a PSTN number, **or a Telnyx AI Assistant id**
-  (`assistant-…`). Type is inferred from the value.
+- **`destination`** — a SIP URI, a PSTN number, a Telnyx AI Assistant id
+  (`assistant-…`), **or the `ai` sentinel** (resolves to the tenant's configured
+  `AI_ASSISTANT_ID` / `companies.csv` id — so you don't hard-code the raw id, and
+  it can't break on the id's format). Type is inferred from the value.
 - **`priority`** — ring order: same number = ring together; higher = later
   fail-over stage. (Above: Sales rings Alice + Bob, then the cell.)
 - **`extension`** — a label for now (reserved for future dial-by-extension).
 - **`active`** — `false` benches someone without deleting the row.
 
 **AI assistants are just another destination.** A row whose `destination` is an
-`assistant-…` id is handed the call via `<Connect><AIAssistant>` on the same leg
-(no extra telephony leg). So Support above rings Carol first and, if she doesn't
-answer, **fails over to an AI assistant** before voicemail — and each
-company/department can point at a *different* assistant. (This is separate from
-the global "press 4" handoff; both can coexist.) Give an assistant its own
-`priority` — it's a terminal stage, not something to ring alongside a human.
+`assistant-…` id (or the `ai` sentinel) is handed the call via
+`<Connect><AIAssistant>` on the same leg (no extra telephony leg). So Support
+above rings Carol first and, if she doesn't answer, **fails over to the AI
+assistant** before voicemail — and each company/department can point at a
+*different* assistant. (This is separate from the global "press 4" handoff; both
+can coexist.) Give an assistant its own `priority` — it's a terminal stage, not
+something to ring alongside a human. To send a department **straight to AI**
+(no human ring), make `ai` the only priority-1 row; to **ring humans then AI**,
+put humans at priority 1 and `ai` at priority 2. If no assistant is configured,
+the `ai` row is skipped and the chain falls over to voicemail as usual.
 
 `data/routing.csv` is gitignored (your internal numbers); `routing.example.csv`
 is the template. Edits apply on the next call — no restart.

@@ -3,8 +3,9 @@
 This is the TOP routing layer. For a dialed number's company and the chosen
 department it yields ordered ring *stages*: rows sharing a `priority` ring
 together, and higher priorities are later fail-over stages. A destination is a
-SIP URI (sip:user@sip.telnyx.com), a PSTN number (+1...), or a Telnyx AI
-Assistant id (assistant-...). When routing.csv is absent or has no active rows
+SIP URI (sip:user@sip.telnyx.com), a PSTN number (+1...), a Telnyx AI Assistant id
+(assistant-...), or the literal "ai" sentinel (resolves to the tenant's configured
+ai_assistant_id, so a row never hard-codes the raw id). When routing.csv is absent or has no active rows
 for a department, callers fall back to data/companies.csv and then the env
 <KEY>_agents/_fallback config — so existing setups keep working unchanged.
 
