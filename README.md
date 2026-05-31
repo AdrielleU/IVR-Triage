@@ -95,7 +95,8 @@ Telnyx ──webhook──► /texml/menu
 Telnyx ──webhook──► /texml/handle-input
       │   1/2/3/0 ─► ring that department's chain (below)
       │   4        ─► <Connect><AIAssistant>            (if an assistant is configured)
-      │   no choice / invalid ─► re-prompt the menu, capped at 3 plays → then close politely
+      │   no choice / invalid ─► re-prompt the menu (5s each), capped at 3 plays → "thank you,
+      │                          please call again" + hang up   (no voicemail/AI at the menu)
       ▼
    department ring chain  (resolved: routing.csv → companies.csv → env)
       SIP agents (ring together)
@@ -109,8 +110,8 @@ Telnyx ──webhook──► /texml/handle-input
         ▼
    busy / voicemail prompt        (data/options.csv "busy" options)
         ├─ press 1/2/0/…  ─► route to AI · a department · a number · voicemail
-        ├─ no keypress    ─► repeat up to BUSY_PROMPT_REPEATS, then "thank you, please
-        │                    call again" + hang up   (closing.xml.j2)
+        ├─ no keypress    ─► repeat up to BUSY_PROMPT_REPEATS, then FALLBACK_ACTION
+        │                    (voicemail | ai | close)
         └─ (no options set) ─► leave a message after the beep
                                  │
                                  ▼
@@ -671,12 +672,13 @@ and tunnel self-heal after a crash.
   outage of this app.
 
 **Behavior to be deliberate about:**
-- **Silence now closes the call, it does not record.** A caller who never presses
-  a key — at the main menu *or* a busy prompt with options — is re-prompted a few
-  times, then hears "thank you, please call again" and is hung up (anti-spam). **A
-  legit but slow caller won't leave a voicemail this way.** If you want a safety
-  net, give the busy prompt an explicit `voicemail` option (e.g. press 0 in
-  `options.csv`), and remember the main menu's `0` already reaches the operator.
+- **What a non-responsive caller gets is `FALLBACK_ACTION`** (per-company:
+  `companies.csv` `fallback_action`). A caller who never makes a valid choice — at
+  the main menu *or* a busy prompt — is re-prompted a few times, then gets:
+  `voicemail` (beep + record — the **default**, standard phone behavior), `ai`
+  (connect the AI assistant — your overflow "voice"), or `close` (polite hang-up,
+  anti-spam). Pick per tenant. With `voicemail`, silence records a message with **no
+  keypress needed**; with `ai`, silence reaches the assistant.
 - **`ENABLE_VOICEMAIL=false` means no message is ever taken** — unanswered calls
   end at a polite goodbye, not a recording.
 - **Whoever isn't in `contacts.csv` shows as their number** (`RAV-SUP-5551234567`)

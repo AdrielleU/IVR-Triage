@@ -103,6 +103,26 @@ def _ai_assistant_id(company: dict | None) -> str:
     return (company.get("ai_assistant_id") if company else "") or settings.ai_assistant_id
 
 
+def _fallback_action(company: dict | None) -> str:
+    """What a non-responsive caller gets at a dead end: "voicemail" | "ai" | "close".
+    From companies.csv `fallback_action`, else FALLBACK_ACTION env, else "voicemail"."""
+    raw = (company.get("fallback_action") if company else "") or settings.fallback_action or "voicemail"
+    return raw.strip().lower()
+
+
+def _fallback_response(company: dict | None, co: str,
+                       caller_name: str | None = None, caller_number: str = "") -> Response:
+    """Terminal action for a non-responsive caller, per the company's `fallback`:
+    connect the AI assistant, record voicemail, or politely close. "ai" with no
+    assistant configured degrades to voicemail so a caller is never just dropped."""
+    action = _fallback_action(company)
+    if action == "ai" and _ai_assistant_id(company):
+        return _connect_ai(_ai_assistant_id(company))
+    if action == "close":
+        return _render("closing.xml.j2", audio_url=prompt_audio("closing", company, co))
+    return _voicemail(company, "main", co)  # "voicemail" (and the safe default)
+
+
 # Routing destinations that mean "the configured AI assistant" rather than a dialable
 # SIP/PSTN endpoint. The "ai" sentinel resolves to the tenant's ai_assistant_id, so a
 # routing row never has to hard-code the raw id (and can't break on its format).
@@ -348,6 +368,9 @@ async def initial_menu(request: Request):
     # like the busy prompt's non-responder).
     attempt = int(request.query_params.get("attempt", "0") or 0)
     if attempt >= MAX_MENU_ATTEMPTS:
+        # No valid selection after the menu re-prompts -> politely terminate. The menu
+        # deliberately does NOT fall to voicemail/AI; fallback_action only applies once
+        # the caller has CHOSEN a department (see _fallback_response).
         log.info("Menu giving up after %d attempts -> closing: from=%s", attempt, From)
         _logc("menu_giveup", company, frm=From, to=To, sid=CallSid, detail=str(attempt))
         return _render("closing.xml.j2", audio_url=prompt_audio("closing", company, co))
@@ -438,12 +461,16 @@ async def voicemail_option(request: Request):
         return _route_to(company, co, option["destination"],
                          contact["name"] if contact else None, From)
 
-    # No press (timeout redirect) or an unmapped key: re-prompt up to the cap, then close.
+    # No press (timeout redirect) or an unmapped key: re-prompt up to the cap, then
+    # do the company's fallback action (voicemail / ai / close).
     if attempt + 1 <= settings.busy_prompt_repeats:
         return _voicemail(company, dept, co, offer_options=True, attempt=attempt + 1)
-    log.info("Busy prompt unanswered after %d plays -> closing call: from=%s", attempt, From)
-    _logc("busy_giveup", company, frm=From, to=To, sid=form.get("CallSid", ""), detail=str(attempt))
-    return _render("closing.xml.j2", audio_url=prompt_audio("closing", company, co))
+    action = _fallback_action(company)
+    log.info("Busy prompt unanswered after %d plays -> %s: from=%s", attempt, action, From)
+    _logc("busy_giveup", company, frm=From, to=To, sid=form.get("CallSid", ""),
+          detail=f"{attempt}:{action}")
+    contact = await lookup_caller(From)
+    return _fallback_response(company, co, contact["name"] if contact else None, From)
 
 
 @router.get("/after-dial")

@@ -212,10 +212,17 @@ department's ring chain, a raw PSTN/SIP dial, or `voicemail` (record). No option
 `<Redirect>`s back to /vm-option, which repeats the prompt up to BUSY_PROMPT_REPEATS
 plays (attempt index in the URL) then renders `closing.xml.j2` and hangs up — silence
 is treated as non-engagement, NOT voicemail (voicemail is the explicit `voicemail`
-option). The main menu behaves the same way: both no-input (the Gather times out and
-the menu `<Redirect>`s to itself with attempt+1) and invalid keypresses advance one
+option). The main menu: both no-input (the 5s Gather times out and the menu
+`<Redirect>`s to itself with attempt+1) and invalid keypresses advance one
 `?attempt=` counter, capped at MAX_MENU_ATTEMPTS plays, then `/texml/menu` renders
-`closing.xml.j2` (close politely) — not voicemail.
+`closing.xml.j2` (politely terminate). The menu deliberately does NOT fall to
+voicemail/AI — a caller who won't pick a department is just closed.
+
+Once the caller HAS chosen a department, a dead end there (busy prompt after the
+repeats) goes through `_fallback_response()` -> the company's `fallback_action`
+(companies.csv col / FALLBACK_ACTION env, default "voicemail"): "voicemail" (beep +
+record), "ai" (`<Connect><AIAssistant>`, -> voicemail if none configured), or
+"close" (`closing.xml.j2`). So "AI is the overflow voice" is `fallback_action=ai`.
 
 ## Resilience
 

@@ -53,11 +53,18 @@ class Settings(BaseSettings):
     voicemail_max_seconds: int = 120
 
     # Busy-prompt keypress options (data/options.csv): how many times to play the
-    # "press 1 for …" prompt when the caller presses nothing, before giving up and
-    # playing the closing message ("Thank you for calling, please call again") and
-    # hanging up — so a non-responsive / spam caller can't hold the line. Voicemail
-    # is still reachable as an explicit option (destination "voicemail").
+    # "press 1 for …" prompt when the caller presses nothing, before doing the
+    # fallback action below. Set to 1 for "play once, then fall back" (no repeat).
     busy_prompt_repeats: int = 2
+
+    # What a non-responsive caller gets when they reach a dead end (the menu after
+    # too many no-input/invalid tries, or a busy prompt after the repeats above):
+    #   "voicemail" — play the beep and record a message (standard; the default)
+    #   "ai"        — connect the AI assistant (your overflow "voice"); falls back to
+    #                 voicemail if no assistant is configured
+    #   "close"     — "thank you, please call again" + hang up (anti-spam)
+    # Per-company override: data/companies.csv `fallback` column.
+    fallback_action: str = "voicemail"
 
     # Recording + legal disclosure. announce_recording plays the disclosure (edited
     # in texml/menu.xml.j2) at the start of every call — required for monitoring/QA
