@@ -448,11 +448,16 @@ Controls:
   ,busy,3,our answering service,+18005559999,true
   ```
   A `destination` is `ai` (the configured assistant), an `assistant-…` id, a
-  **department** key (rings that chain), a **PSTN number**, or a **SIP URI**. Press
-  a configured key → it routes there; **no keypress → beep + record** (voicemail);
-  an unmapped key → record. Add rows to add keys. With no `options.csv`, the default
-  is "press 1 = AI assistant" when one is configured (else straight to voicemail).
-  `options.csv` is gitignored — ship from `options.example.csv`.
+  **department** key (rings that chain), a **PSTN number**, a **SIP URI**, or
+  `voicemail` (leave a message). Press a configured key → it routes there.
+  **If the caller presses nothing**, the prompt repeats up to `BUSY_PROMPT_REPEATS`
+  times (default 2), then the call is **politely closed** ("Thank you for calling,
+  please call again." — `texml/closing.xml.j2`, or an `audio/closing.mp3` clip) and
+  hung up — so a silent/spam caller can't hold the line. To let callers leave a
+  message, give them a `voicemail` option (e.g. press 0). Add rows to add keys.
+  With no `options.csv`, the default is "press 1 = AI" when an assistant is
+  configured; a department with no options at all still records voicemail on no
+  answer as before. `options.csv` is gitignored — ship from `options.example.csv`.
 
 Where messages go: Telnyx records and **stores every voicemail on Telnyx** (Portal
 → Reporting → Recordings, or via API). To also keep them locally with transcripts,

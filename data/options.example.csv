@@ -1,4 +1,5 @@
 company,context,digit,label,destination,active
 ,busy,1,our virtual assistant,ai,true
 ,busy,2,the operator,operator,true
+,busy,0,voicemail,voicemail,true
 18005550001,busy,1,Acme support AI,ai,true

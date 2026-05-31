@@ -1,0 +1,13 @@
+{#- Played when the busy prompt got no response after busy_prompt_repeats plays
+    (likely a non-responsive / spam caller). Politely closes the call. audio_url
+    plays a recorded "closing" clip (audio/closing.mp3) instead of TTS.
+    Variables: voice, audio_url. -#}
+<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+{%- if audio_url %}
+  <Play>{{ audio_url }}</Play>
+{%- else %}
+  <Say voice="{{ voice }}">Thank you for calling. Please call again. Goodbye.</Say>
+{%- endif %}
+  <Hangup/>
+</Response>

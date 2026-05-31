@@ -18,6 +18,7 @@ Each of these prompts plays a clip if one is found, else falls back to TTS:
 | `after_hours` | Office-closed greeting (record a generic one)             |
 | `invalid`     | Caller pressed a key with no option                       |
 | `goodbye`     | Call wrap-up                                               |
+| `closing`     | Busy prompt got no response after the repeat cap — "thank you, please call again" before hangup |
 
 ## How a clip is chosen (first hit wins)
 

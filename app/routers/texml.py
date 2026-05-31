@@ -141,6 +141,8 @@ def _route_to(company: dict | None, co: str, destination: str,
     aid = _assistant_for(destination, company)
     if aid:
         return _connect_ai(aid)
+    if destination.strip().lower() in ("voicemail", "vm", "message"):
+        return _voicemail(company, "main", co)  # explicit "leave a message" choice
     if _stages(company, destination, co):  # a department key with a configured chain
         return _dial_stage(company, destination, 0, co,
                            caller_name=caller_name, caller_number=caller_number)
@@ -223,7 +225,8 @@ def _from_display(company: dict | None, dept_key: str, caller_name: str | None,
 
 
 def _voicemail(company: dict | None, dept_key: str, co: str,
-               template: str = "voicemail.xml.j2", offer_options: bool = False) -> Response:
+               template: str = "voicemail.xml.j2", offer_options: bool = False,
+               attempt: int = 1) -> Response:
     # The "no agents configured" case (unavailable.xml.j2) can have its own clip
     # ("all agents are busy, leave your name and number…"); if none is set it falls
     # back to the generic voicemail clip, then to TTS.
@@ -232,10 +235,11 @@ def _voicemail(company: dict | None, dept_key: str, co: str,
     else:
         audio_url = prompt_audio("voicemail", company, co)
     # When offer_options is set, the prompt gathers configurable "press <digit> for
-    # <label>" options (data/options.csv, else default press-1->AI) before falling
-    # through to the recording. option_action handles the keypress.
+    # <label>" options (data/options.csv, else default press-1->AI). Both the keypress
+    # and the no-press timeout post back to /vm-option with this attempt index, which
+    # bounds how many times the prompt repeats before the call is politely closed.
     options = _busy_options(company, co) if offer_options else []
-    option_action = (f"{settings.base_url}/texml/vm-option?co={co}&dept={dept_key}"
+    option_action = (f"{settings.base_url}/texml/vm-option?co={co}&dept={dept_key}&attempt={attempt}"
                      if options else "")
     return _render(
         template,
@@ -407,16 +411,21 @@ async def handle_input(request: Request):
                        caller_name=contact["name"] if contact else None, caller_number=From)
 
 
+@router.get("/vm-option")
 @router.post("/vm-option")
 async def voicemail_option(request: Request):
-    """The caller pressed a key at the busy/voicemail prompt. If the digit matches a
-    configured busy option, route to its destination (AI / department / number);
-    any other key just takes the message (record-only, so a wrong key can't loop)."""
+    """Busy/voicemail prompt keypress handler. A digit matching a configured option
+    routes to its destination (AI / department / number / voicemail). A non-press
+    (the Gather timed out and Redirected here) or an unmapped key re-plays the prompt
+    up to busy_prompt_repeats times, then plays the closing message and hangs up — so
+    a non-responsive caller can't hold the line."""
     form = await verified_form(request)
     digit, From, To = form.get("Digits", ""), form.get("From", ""), form.get("To", "")
     co = request.query_params.get("co", "") or normalize(To)
     dept = request.query_params.get("dept", "")
+    attempt = int(request.query_params.get("attempt", "1") or 1)
     company = get_company(co)
+
     option = next((o for o in _busy_options(company, co) if o["digit"] == digit), None)
     if option:
         log.info("Busy-prompt option: digit=%s -> %s from=%s company=%r",
@@ -426,8 +435,13 @@ async def voicemail_option(request: Request):
         contact = await lookup_caller(From)
         return _route_to(company, co, option["destination"],
                          contact["name"] if contact else None, From)
-    # Any other key: take the message, without re-offering options (avoids a loop).
-    return _voicemail(company, dept, co, offer_options=False)
+
+    # No press (timeout redirect) or an unmapped key: re-prompt up to the cap, then close.
+    if attempt + 1 <= settings.busy_prompt_repeats:
+        return _voicemail(company, dept, co, offer_options=True, attempt=attempt + 1)
+    log.info("Busy prompt unanswered after %d plays -> closing call: from=%s", attempt, From)
+    _logc("busy_giveup", company, frm=From, to=To, sid=form.get("CallSid", ""), detail=str(attempt))
+    return _render("closing.xml.j2", audio_url=prompt_audio("closing", company, co))
 
 
 @router.get("/after-dial")

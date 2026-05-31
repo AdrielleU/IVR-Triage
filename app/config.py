@@ -52,6 +52,13 @@ class Settings(BaseSettings):
     enable_voicemail: bool = True
     voicemail_max_seconds: int = 120
 
+    # Busy-prompt keypress options (data/options.csv): how many times to play the
+    # "press 1 for …" prompt when the caller presses nothing, before giving up and
+    # playing the closing message ("Thank you for calling, please call again") and
+    # hanging up — so a non-responsive / spam caller can't hold the line. Voicemail
+    # is still reachable as an explicit option (destination "voicemail").
+    busy_prompt_repeats: int = 2
+
     # Recording + legal disclosure. announce_recording plays the disclosure (edited
     # in texml/menu.xml.j2) at the start of every call — required for monitoring/QA
     # recording in many places (esp. all-party-consent states). record_calls also

@@ -204,11 +204,15 @@ and assign your number to it.
 
 Busy-prompt options: at the busy/voicemail prompt, `data/options.csv`
 (`app/services/options.py`, context "busy": company,context,digit,label,destination)
-offers "press <digit> for <label>" before the beep. `/texml/vm-option` dispatches a
-press via `_route_to`: a destination resolves to an AI assistant (`ai`/`assistant-…`),
-a department's ring chain, or a raw PSTN/SIP dial (-> voicemail). No options.csv ->
-default press-1->AI when an assistant is configured. No/unmapped keypress falls
-through to `<Record>`. The invalid-menu loop is capped by MAX_MENU_ATTEMPTS via an
+offers "press <digit> for <label>". `/texml/vm-option` dispatches a press via
+`_route_to`: a destination resolves to an AI assistant (`ai`/`assistant-…`), a
+department's ring chain, a raw PSTN/SIP dial, or `voicemail` (record). No options.csv
+-> default press-1->AI when an assistant is configured (else no options -> straight
+`<Record>` voicemail as before). When options ARE offered, a no-press timeout
+`<Redirect>`s back to /vm-option, which repeats the prompt up to BUSY_PROMPT_REPEATS
+plays (attempt index in the URL) then renders `closing.xml.j2` and hangs up — silence
+is treated as non-engagement, NOT voicemail (voicemail is the explicit `voicemail`
+option). The invalid-menu loop is separately capped by MAX_MENU_ATTEMPTS via an
 `?attempt=` index threaded menu -> handle-input -> invalid -> menu.
 
 ## Resilience

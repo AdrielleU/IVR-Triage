@@ -1,8 +1,7 @@
-{#- A menu option was chosen but no agents are configured for it. Goes to
-    voicemail so the caller isn't dropped. audio_url plays a recorded prompt
-    (e.g. "all our agents are busy, leave your name and number") instead of TTS.
-    When options are configured, the prompt is wrapped in a <Gather> offering
-    "for <label>, press <digit>"; no keypress falls through to the <Record> below.
+{#- A menu option was chosen but no agents are configured for it. With configured
+    options it offers "for <label>, press <digit>" and the no-press timeout Redirects
+    to /vm-option (repeats up to busy_prompt_repeats, then plays the closing message).
+    With NO options it records a message directly. audio_url plays a recorded prompt.
     Variables: department, dept_key, max_seconds, voice, base_url, audio_url,
     options (list of {digit,label}), option_action. -#}
 <?xml version="1.0" encoding="UTF-8"?>
@@ -12,17 +11,20 @@
   {%- if audio_url %}
     <Play>{{ audio_url }}</Play>
   {%- else %}
-    <Say voice="{{ voice }}">Sorry, all of our agents are busy right now. {% for o in options %}For {{ o.label }}, press {{ o.digit }}. {% endfor %}Or leave a message with your name and number after the beep, and we'll call you back soon.</Say>
+    <Say voice="{{ voice }}">Sorry, all of our agents are busy right now. {% for o in options %}For {{ o.label }}, press {{ o.digit }}. {% endfor %}</Say>
   {%- endif %}
   </Gather>
-{%- elif audio_url %}
-  <Play>{{ audio_url }}</Play>
+  <Redirect>{{ option_action }}</Redirect>
 {%- else %}
+  {%- if audio_url %}
+  <Play>{{ audio_url }}</Play>
+  {%- else %}
   <Say voice="{{ voice }}">Sorry, all of our agents are busy right now. Please leave a message with your name and number after the beep, and we'll call you back soon.</Say>
-{%- endif %}
+  {%- endif %}
   <Record maxLength="{{ max_seconds }}" finishOnKey="#" playBeep="true"
           action="{{ base_url }}/texml/voicemail-done?dept={{ dept_key }}&amp;co={{ co }}" method="POST"
           recordingStatusCallback="{{ base_url }}/texml/recording?dept={{ dept_key }}&amp;co={{ co }}" />
   <Say voice="{{ voice }}">We did not receive a message. Goodbye.</Say>
   <Hangup/>
+{%- endif %}
 </Response>
