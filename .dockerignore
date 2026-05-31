@@ -4,3 +4,9 @@ __pycache__/
 .env
 .git/
 *.md
+
+# Don't bake operational data (real caller PII in contacts.csv, internal
+# numbers, hours) into a shippable image — it comes from the runtime bind
+# mount instead. Ship only the *.example.csv so the image is self-documenting.
+data/*.csv
+!data/*.example.csv
