@@ -4,8 +4,10 @@ A small FastAPI app that serves a **TeXML** IVR for a Telnyx number. Callers hea
 a menu (1 sales / 2 support / 3 billing / 0 operator), get rung through to your
 agents (SIP softphones or phone numbers), and land in **voicemail** if nobody
 answers. Human routing rides **plain telephony minutes** (~$0.002/min/leg + SIP
-trunk fee), not AI minutes. Inbound callers are matched against HubSpot by phone
-so they're logged and greeted by name.
+trunk fee), not AI minutes. Inbound callers are matched against a local
+**`data/contacts.csv`** by phone so they're logged and greeted by name — no
+database, no API on the call path. (Auto-syncing that CSV from a CRM like
+HubSpot is a planned premium add-on; see *Caller matching* below.)
 
 Optionally, set `AI_ASSISTANT_ID` to add a **"press 4" handoff to a Telnyx AI
 Assistant**. It uses `<Connect><AIAssistant>`, which runs the assistant on the
@@ -15,13 +17,68 @@ telephony leg** (see *AI Assistant handoff* below).
 All the call XML lives in **editable templates** under `texml/` — change a
 greeting, menu, or voicemail prompt and the next call uses it, no restart.
 
+## Quick deploy (Docker + Cloudflare Tunnel)
+
+Get a working phone IVR with a public HTTPS endpoint and **no open ports** in a
+few minutes. You need a Cloudflare account with a domain, and a Telnyx number.
+
+**1. Create a Cloudflare Tunnel and copy its token.**
+In the [Cloudflare Zero Trust dashboard](https://one.dash.cloudflare.com/) →
+**Networks → Tunnels → Create a tunnel** → connector **Cloudflared**. Cloudflare
+then shows an install command like `cloudflared service install eyJ...` — you
+only need the long **`eyJ...` token** at the end (skip running the command; the
+compose file runs cloudflared for you). Then under **Public Hostname → Add**:
+
+| Field      | Value                                   |
+|------------|-----------------------------------------|
+| Subdomain  | e.g. `ivr` → `ivr.yourdomain.com`       |
+| Type       | `HTTP`                                  |
+| URL        | `ivr:8000`  ← the compose service name  |
+
+**2. Configure `.env`.**
+```bash
+cp .env.example .env
+```
+```ini
+BASE_URL=https://ivr.yourdomain.com     # the public hostname from step 1
+TUNNEL_TOKEN=eyJ...                      # the token from step 1
+VERIFY_SIGNATURES=true                   # reject spoofed webhooks in production
+TELNYX_API_KEY=...                       # from the Telnyx portal
+TELNYX_PUBLIC_KEY=...                    # for signature verification
+SALES_AGENTS=sip:jane@sip.telnyx.com     # who each menu option rings
+SUPPORT_AGENTS=sip:bob@sip.telnyx.com    # (comma-separate for multiple)
+BILLING_AGENTS=+15551234567              # SIP URI or PSTN number
+OPERATOR_AGENTS=sip:ops@sip.telnyx.com
+```
+
+**3. Start the app + tunnel.**
+```bash
+# pull the published image instead of building (optional):
+#   docker pull adrielleu/ivr-triage:latest
+docker compose --profile tunnel up -d --build
+docker compose logs -f tunnel    # wait for "Registered tunnel connection" x4
+curl https://ivr.yourdomain.com/health   # expect HTTP 200
+```
+
+**4. Point Telnyx at it.**
+In the Telnyx portal create a **TeXML Application** with the voice webhook set to
+`https://ivr.yourdomain.com/texml/menu`, then assign your number to it. Call the
+number — you should hear the menu.
+
+> The tunnel makes the app outbound-only (Cloudflare terminates TLS at the edge;
+> the hop to your container stays internal), so you can remove the `ports:` block
+> in `docker-compose.yml` for a tunnel-only deploy. No Caddy/nginx needed.
+
+See [`.env.example`](.env.example) for the full list of settings (caller
+matching, business hours, recording, the optional AI handoff).
+
 ## How a call flows
 
 ```
 Caller dials your number
       │
       ▼
-Telnyx ──webhook──► /texml/menu        (business-hours check, HubSpot lookup, greeting + DTMF)
+Telnyx ──webhook──► /texml/menu        (business-hours check, contacts.csv lookup, greeting + DTMF)
       │  caller presses a key
       ▼
 Telnyx ──webhook──► /texml/handle-input   (rings that department's agents via <Dial>)
@@ -61,10 +118,11 @@ Dockerfile  docker-compose.yml  requirements.txt  .env.example
 
 No code or restart needed — edit and the next call picks it up.
 
-- **`contacts.csv`** — `phone,name,company,tier`. Inbound numbers are matched
-  here first (instant, no API). Refresh from HubSpot with
-  `python scripts/sync_hubspot.py`, or drop in a CSV exported from anywhere.
-  Matching ignores formatting (compares the last 10 digits).
+- **`contacts.csv`** — `phone,name,company,tier`. This is the **source of truth**
+  for caller matching: inbound numbers are looked up here (instant, in-memory, no
+  API). Drop in a CSV exported from anywhere — your CRM, a spreadsheet, etc.
+  Matching ignores formatting (compares the last 10 digits). *(Auto-refreshing
+  this file from HubSpot is a planned premium feature.)*
 - **`hours.csv`** — `day,open,close` per weekday (`HH:MM`; blank = closed that day).
 - **`holidays.csv`** — `date,note` for **company-specific** closures only (offsite,
   etc.). Standard public holidays are computed automatically (`HOLIDAY_COUNTRY` /
@@ -293,12 +351,20 @@ off. Don't wrap the assistant in a `<Dial>`; that reintroduces the double-leg.
 > surcharged — you just pay the (cheap) per-minute legs. Confirm on your first
 > invoice.
 
-## HubSpot caller matching (optional)
+## Caller matching
 
-Set `HUBSPOT_TOKEN` (Private App token, CRM read scope). Each call searches
-Contacts by `phone`/`mobilephone`; a match is logged and greeted by name. Store
-numbers in E.164 so they match what Telnyx sends. If unset or HubSpot is down,
-the call proceeds normally — the CRM is never on the critical path.
+Caller matching reads from **`data/contacts.csv`** (`phone,name,company,tier`) —
+loaded into memory and re-read whenever the file changes, so there's no database
+and nothing on the call's critical path. Export contacts from your CRM or a
+spreadsheet and drop the file in; the next call uses it. Numbers are matched on
+the last 10 digits, so formatting doesn't matter.
+
+> **Premium (planned): CRM auto-sync.** Keeping `contacts.csv` in lockstep with a
+> live CRM such as **HubSpot** — scheduled pulls, a live API fallback for misses —
+> is a premium feature we may add. The plumbing exists behind `HUBSPOT_TOKEN`
+> (`app/services/hubspot.py`, `scripts/sync_hubspot.py`) but is not a supported
+> part of the core, CSV-driven product. Even when enabled, the CSV stays the
+> source of truth and the CRM is never on the critical path.
 
 ## Voicemail — what to put, and when callers hear it
 
