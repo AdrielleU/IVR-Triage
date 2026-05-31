@@ -2,17 +2,18 @@
     Available variables: caller_name (or None), voice, base_url, menu_audio_url,
     ai_enabled (offer the AI-assistant option), announce_recording, action_url
     (handle-input URL carrying the attempt counter), reprompt_url (re-show the menu
-    with attempt+1 on no input; capped, then the call is closed). -#}
+    with attempt+1 on no input; capped, then the call is closed), attempt (0 on the
+    first play; >0 on a re-prompt -> shorter "didn't get that" intro, no disclosure). -#}
 <?xml version="1.0" encoding="UTF-8"?>
 <Response>
-{%- if announce_recording %}
+{%- if announce_recording and not attempt %}
   <Say voice="{{ voice }}">This call may be recorded for quality and monitoring purposes.</Say>
 {%- endif %}
   <Gather numDigits="1" timeout="5" action="{{ action_url or (base_url ~ '/texml/handle-input') }}" method="POST">
 {%- if menu_audio_url %}
     <Play>{{ menu_audio_url }}</Play>
 {%- else %}
-    <Say voice="{{ voice }}">{% if caller_name %}Welcome back, {{ caller_name }}. {% endif %}Thank you for calling{% if company_name %} {{ company_name }}{% endif %}. For sales, press 1. For technical support, press 2. For billing or account questions, press 3. To speak with an operator, press 0.{% if ai_enabled %} Or to speak with our virtual assistant, press 4.{% endif %}</Say>
+    <Say voice="{{ voice }}">{% if attempt %}Sorry, I didn't get that. {% else %}{% if caller_name %}Welcome back, {{ caller_name }}. {% endif %}Thank you for calling{% if company_name %} {{ company_name }}{% endif %}. {% endif %}For sales, press 1. For technical support, press 2. For billing or account questions, press 3. To speak with an operator, press 0.{% if ai_enabled %} Or to speak with our virtual assistant, press 4.{% endif %}</Say>
 {%- endif %}
   </Gather>
   {#- No selection (the Gather timed out): re-show the menu (bounded by attempt);

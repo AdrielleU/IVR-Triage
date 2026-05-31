@@ -394,6 +394,7 @@ async def initial_menu(request: Request):
                    menu_audio_url=_menu_audio(company, co),
                    ai_enabled=bool(_ai_assistant_id(company)),
                    announce_recording=settings.announce_recording,
+                   attempt=attempt,
                    action_url=f"{settings.base_url}/texml/handle-input?attempt={attempt}",
                    reprompt_url=f"{settings.base_url}/texml/menu?attempt={attempt + 1}")
 
