@@ -1,3 +1,4 @@
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -153,6 +154,12 @@ class Settings(BaseSettings):
     # Application
     base_url: str
     debug: bool = False
+
+    @field_validator("base_url")
+    @classmethod
+    def _strip_trailing_slash(cls, v: str) -> str:
+        # A trailing slash would make every callback URL "<base>//texml/…"; drop it.
+        return v.rstrip("/") if v else v
 
     class Config:
         env_file = ".env"
