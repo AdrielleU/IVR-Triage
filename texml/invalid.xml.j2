@@ -1,7 +1,11 @@
 {#- Caller pressed a key with no menu option. Re-prompts once; the menu's own
-    timeout caps any loop. Variables: voice, base_url. -#}
+    timeout caps any loop. Variables: voice, base_url, audio_url. -#}
 <?xml version="1.0" encoding="UTF-8"?>
 <Response>
+{%- if audio_url %}
+  <Play>{{ audio_url }}</Play>
+{%- else %}
   <Say voice="{{ voice }}">That was not a valid option.</Say>
+{%- endif %}
   <Redirect>{{ base_url }}/texml/menu</Redirect>
 </Response>

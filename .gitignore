@@ -39,6 +39,13 @@ data/routing.csv
 recordings/*
 !recordings/.gitkeep
 
+# Pre-recorded prompt clips — host-mounted like data/ and texml/, so the audio
+# itself isn't version-controlled. Keep the folder + its README. Un-ignore
+# specific clips (e.g. !audio/menu.mp3) if you'd rather commit them.
+audio/*
+!audio/.gitkeep
+!audio/README.md
+
 # IDE
 .vscode/
 .idea/

@@ -24,7 +24,7 @@ COPY scripts/ ./scripts/
 # Non-root user. Create the recordings dir up front and hand it to that user so the
 # app can write (and a named volume inherits the right ownership).
 RUN useradd --create-home --uid 1000 appuser \
- && mkdir -p /app/recordings \
+ && mkdir -p /app/recordings /app/audio \
  && chown -R appuser /app/recordings
 USER appuser
 

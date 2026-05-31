@@ -1,9 +1,15 @@
 {#- Shown when a call arrives outside business hours and no after-hours agents
     are configured: state the hours, then let the caller leave a voicemail.
-    Variables: open_hour, close_hour, dept_key, max_seconds, voice, base_url. -#}
+    Variables: open_hour, close_hour, dept_key, max_seconds, voice, base_url, audio_url.
+    A recorded clip (audio_url) replaces the spoken hours, so record a generic
+    after-hours greeting if you use it. -#}
 <?xml version="1.0" encoding="UTF-8"?>
 <Response>
+{%- if audio_url %}
+  <Play>{{ audio_url }}</Play>
+{%- else %}
   <Say voice="{{ voice }}">Thanks for calling. Our office is currently closed. Our hours are {{ open_hour }} to {{ close_hour }}. Please leave a message after the beep and we'll get back to you.</Say>
+{%- endif %}
   <Record maxLength="{{ max_seconds }}" finishOnKey="#" playBeep="true"
           action="{{ base_url }}/texml/voicemail-done?dept={{ dept_key }}&amp;co={{ co }}" method="POST"
           recordingStatusCallback="{{ base_url }}/texml/recording?dept={{ dept_key }}&amp;co={{ co }}" />

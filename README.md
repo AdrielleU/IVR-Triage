@@ -393,12 +393,39 @@ Failover URL, so callers can leave a message even when this app is down (see
 Controls:
 - `ENABLE_VOICEMAIL=true|false` — turn voicemail on/off (off = polite hang-up).
 - `VOICEMAIL_MAX_SECONDS=120` — max message length (billed as plain telephony time).
-- To use a **recorded greeting** instead of TTS, replace the `<Say>` line in a
-  template with `<Play>https://your-cdn/vm-greeting.mp3</Play>`.
+- To use a **recorded voicemail prompt** instead of TTS, drop an
+  `audio/voicemail.mp3` clip — see *Recorded prompts* below.
 
 Where messages go: Telnyx records and **stores every voicemail on Telnyx** (Portal
 → Reporting → Recordings, or via API). To also keep them locally with transcripts,
 see the next section.
+
+## Recorded prompts (play audio instead of TTS)
+
+Play your own **recorded clips** to callers instead of the synthesized voice — a
+branded greeting, a human-recorded voicemail prompt, etc. Supported for the
+**menu, voicemail, after-hours, invalid-key, and goodbye** prompts; any prompt
+without a clip falls back to TTS automatically.
+
+Two ways to set a clip, first hit wins:
+
+1. **Just drop a file** in `./audio` (zero config):
+   - `audio/menu.mp3` — used for every number
+   - `audio/<dialed-number-last10>/menu.mp3` — per-company override
+   - extensions tried: `.mp3`, `.wav`, `.ogg`
+2. **Point at a URL or filename** via env (`MENU_AUDIO_URL`, `VOICEMAIL_AUDIO_URL`,
+   `AFTER_HOURS_AUDIO_URL`, `INVALID_AUDIO_URL`, `GOODBYE_AUDIO_URL`) or the matching
+   `data/companies.csv` column. A value is either a full `https://…` URL (host it
+   anywhere) or a bare filename served from `./audio`.
+
+Local files are served by the app at `https://<BASE_URL>/audio/…`, so Telnyx
+fetches them over the same public URL as the webhooks — no CDN required. The
+`./audio` folder is bind-mounted, so adding or swapping a clip takes effect on the
+**next call**, no restart. The folder's contents are gitignored by default (treated
+as deployment assets, not source). Full details in [`audio/README.md`](audio/README.md).
+
+> Telephony tip: 8 kHz mono is plenty for phone audio and keeps files small.
+> `BASE_URL` must be your real public URL (not `localhost`) for `<Play>` to resolve.
 
 ## Recording, transcription & storage (no database)
 

@@ -33,6 +33,7 @@ services:
     volumes:
       - ./texml:/app/texml:ro          # templates  (ro = container can't modify them)
       - ./data:/app/data:ro            # CSV data   (ro)
+      - ./audio:/app/audio:ro          # pre-recorded prompt clips, served at /audio (ro)
       - ./recordings:/app/recordings   # recordings (rw — must be writable)
       # If the app can't write to ./recordings (permission denied), the container
       # user is uid 1000; either `chown -R 1000 recordings` on the host, or switch

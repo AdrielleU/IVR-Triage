@@ -81,6 +81,19 @@ class Settings(BaseSettings):
     company_name: str = ""
     menu_audio_url: str | None = None
 
+    # Pre-recorded prompt playback (optional). Each prompt can play a recorded
+    # clip via TeXML <Play> instead of TTS <Say>; if unset, the template falls
+    # back to TTS. A value may be a full http(s):// URL (host it anywhere) OR a
+    # bare filename/relative path served from the local audio_dir (mounted at
+    # /audio). Even without these set, dropping audio/<prompt>.mp3 (or
+    # audio/<company>/<prompt>.mp3 per-tenant) is auto-discovered. Per-company
+    # overrides live in companies.csv columns of the same name.
+    audio_dir: str = "audio"
+    voicemail_audio_url: str | None = None
+    after_hours_audio_url: str | None = None
+    invalid_audio_url: str | None = None
+    goodbye_audio_url: str | None = None
+
     # Business hours. When enforce_business_hours is True, calls outside the
     # window are sent to after_hours_number (if set) or politely turned away.
     enforce_business_hours: bool = False

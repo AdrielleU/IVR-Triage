@@ -7,6 +7,7 @@ import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.routers import texml
@@ -56,6 +57,14 @@ app.add_middleware(
 )
 
 app.include_router(texml.router, prefix="/texml", tags=["TeXML"])
+
+# Serve pre-recorded prompt clips so Telnyx can <Play> them over BASE_URL. Bind
+# audio_dir from the host (compose) to swap clips without a rebuild. Created if
+# absent so the mount never fails on a fresh deploy. NOTE: this serves only
+# audio_dir — never point it at recordings_dir (caller PII).
+_audio_dir = Path(settings.audio_dir)
+_audio_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/audio", StaticFiles(directory=str(_audio_dir)), name="audio")
 
 
 @app.get("/")

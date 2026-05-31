@@ -10,6 +10,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from app.config import settings
 from app.security import verified_form
+from app.services.audio import prompt_audio
 from app.services.companies import get_company, normalize
 from app.services.contacts import lookup_caller
 from app.services.recordings import process_recording
@@ -67,8 +68,10 @@ def _company_name(company: dict | None) -> str | None:
     return (company.get("name") if company else None) or (settings.company_name or None)
 
 
-def _menu_audio(company: dict | None) -> str | None:
-    return (company.get("menu_audio_url") if company else None) or settings.menu_audio_url
+def _menu_audio(company: dict | None, co: str = "") -> str | None:
+    # Routed through prompt_audio so the menu greeting supports the same local-file
+    # hosting / per-company convention as the other prompts (full URL still works).
+    return prompt_audio("menu", company, co)
 
 
 def _ai_assistant_id(company: dict | None) -> str:
@@ -123,13 +126,15 @@ def _from_display(dept_key: str, caller_name: str | None) -> str:
     return re.sub(r"\s+", " ", _DISPLAY_DISALLOWED.sub(" ", raw)).strip()[:128]
 
 
-def _voicemail(dept_key: str, co: str, template: str = "voicemail.xml.j2") -> Response:
+def _voicemail(company: dict | None, dept_key: str, co: str,
+               template: str = "voicemail.xml.j2") -> Response:
     return _render(
         template,
         department=LABELS.get(dept_key, "us"),
         dept_key=dept_key,
         co=co,
         max_seconds=settings.voicemail_max_seconds,
+        audio_url=prompt_audio("voicemail", company, co),
     )
 
 
@@ -144,7 +149,9 @@ def _dial_stage(company: dict | None, dept_key: str, stage: int, co: str,
     """
     stages = _stages(company, dept_key, co)
     if stage >= len(stages):
-        return _voicemail(dept_key, co) if settings.enable_voicemail else _render("goodbye.xml.j2")
+        if settings.enable_voicemail:
+            return _voicemail(company, dept_key, co)
+        return _render("goodbye.xml.j2", audio_url=prompt_audio("goodbye", company, co))
     # An AI-assistant destination is terminal: <Connect> it to THIS leg instead of
     # opening a new <Dial> leg. Give an assistant its own priority/stage; if a stage
     # mixes one in, the assistant wins (you wouldn't ring a human and an AI at once).
@@ -184,6 +191,7 @@ async def initial_menu(request: Request):
             max_seconds=settings.voicemail_max_seconds,
             open_hour=settings.business_open_hour,
             close_hour=settings.business_close_hour,
+            audio_url=prompt_audio("after_hours", company, co),
         )
 
     contact = await lookup_caller(From)
@@ -198,7 +206,7 @@ async def initial_menu(request: Request):
 
     return _render("menu.xml.j2", caller_name=contact["name"] if contact else None,
                    company_name=_company_name(company),
-                   menu_audio_url=_menu_audio(company),
+                   menu_audio_url=_menu_audio(company, co),
                    ai_enabled=bool(_ai_assistant_id(company)),
                    announce_recording=settings.announce_recording)
 
@@ -219,12 +227,12 @@ async def handle_input(request: Request):
 
     dept = DEPARTMENTS.get(digit)
     if dept is None:
-        return _render("invalid.xml.j2")
+        return _render("invalid.xml.j2", audio_url=prompt_audio("invalid", company, co))
 
     _, key = dept
     if not _stages(company, key, co):
         # Nobody configured for this option — take a message instead of dropping.
-        return _voicemail(key, co, template="unavailable.xml.j2")
+        return _voicemail(company, key, co, template="unavailable.xml.j2")
 
     # Re-resolve the caller so the agent's phone shows "<Dept> - <Name>". Local-CSV
     # first and mtime-cached, so this is essentially free and still off the path.
@@ -246,7 +254,7 @@ async def after_dial(request: Request):
     log.info("Dial finished: dept=%s stage=%s status=%s", dept_key, stage, status or "(none)")
 
     if status == "completed":
-        return _render("goodbye.xml.j2")
+        return _render("goodbye.xml.j2", audio_url=prompt_audio("goodbye", company, co))
     contact = await lookup_caller(form.get("From", ""))
     return _dial_stage(company, dept_key, stage + 1, co,
                        caller_name=contact["name"] if contact else None)
@@ -256,13 +264,14 @@ async def after_dial(request: Request):
 async def voicemail_done(request: Request):
     """The caller finished recording. Telnyx includes the recording URL here."""
     form = await verified_form(request)
+    co = request.query_params.get("co", "") or normalize(form.get("To", ""))
     log.info(
         "Voicemail left: dept=%s duration=%ss url=%s",
         request.query_params.get("dept", ""),
         form.get("RecordingDuration", "?"),
         form.get("RecordingUrl", "?"),
     )
-    return _render("goodbye.xml.j2")
+    return _render("goodbye.xml.j2", audio_url=prompt_audio("goodbye", get_company(co), co))
 
 
 @router.post("/recording")
