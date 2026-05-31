@@ -98,6 +98,7 @@ class Settings(BaseSettings):
     # overrides live in companies.csv columns of the same name.
     audio_dir: str = "audio"
     voicemail_audio_url: str | None = None
+    unavailable_audio_url: str | None = None  # "no agents configured" prompt; falls back to voicemail clip
     after_hours_audio_url: str | None = None
     invalid_audio_url: str | None = None
     goodbye_audio_url: str | None = None

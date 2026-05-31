@@ -433,19 +433,21 @@ see the next section.
 
 Play your own **recorded clips** to callers instead of the synthesized voice — a
 branded greeting, a human-recorded voicemail prompt, etc. Supported for the
-**menu, voicemail, after-hours, invalid-key, and goodbye** prompts; any prompt
-without a clip falls back to TTS automatically.
+**menu, voicemail, unavailable (no-agents), after-hours, invalid-key, and goodbye**
+prompts; any prompt without a clip falls back to TTS automatically. (The
+`unavailable` prompt falls back to your `voicemail` clip before TTS.)
 
 Two ways to set a clip, first hit wins:
 
 1. **Just drop a file** in `./audio` (zero config):
    - `audio/menu.mp3` — used for every number
    - `audio/<dialed-number-last10>/menu.mp3` — per-company override
-   - extensions tried: `.mp3`, `.wav`, `.ogg`
+   - extensions tried: `.mp3`, `.wav` (Telnyx `<Play>` is unreliable with OGG)
 2. **Point at a URL or filename** via env (`MENU_AUDIO_URL`, `VOICEMAIL_AUDIO_URL`,
-   `AFTER_HOURS_AUDIO_URL`, `INVALID_AUDIO_URL`, `GOODBYE_AUDIO_URL`) or the matching
-   `data/companies.csv` column. A value is either a full `https://…` URL (host it
-   anywhere) or a bare filename served from `./audio`.
+   `UNAVAILABLE_AUDIO_URL`, `AFTER_HOURS_AUDIO_URL`, `INVALID_AUDIO_URL`,
+   `GOODBYE_AUDIO_URL`) or the matching `data/companies.csv` column. A value is
+   either a full `https://…` URL (host it anywhere) or a bare filename served
+   from `./audio`.
 
 Local files are served by the app at `https://<BASE_URL>/audio/…`, so Telnyx
 fetches them over the same public URL as the webhooks — no CDN required. The

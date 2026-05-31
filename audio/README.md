@@ -10,13 +10,14 @@ swapping a clip takes effect on the **next call** — no rebuild, no restart.
 
 Each of these prompts plays a clip if one is found, else falls back to TTS:
 
-| Prompt        | When the caller hears it                         |
-|---------------|--------------------------------------------------|
-| `menu`        | Main greeting + menu options (the entry prompt)  |
-| `voicemail`   | "Leave a message after the beep"                 |
-| `after_hours` | Office-closed greeting (record a generic one)    |
-| `invalid`     | Caller pressed a key with no option              |
-| `goodbye`     | Call wrap-up                                      |
+| Prompt        | When the caller hears it                                   |
+|---------------|------------------------------------------------------------|
+| `menu`        | Main greeting + menu options (the entry prompt)            |
+| `voicemail`   | Agents rang but nobody answered — "leave a message"        |
+| `unavailable` | Option chosen but no agents configured — "all agents busy" (falls back to the `voicemail` clip if unset) |
+| `after_hours` | Office-closed greeting (record a generic one)             |
+| `invalid`     | Caller pressed a key with no option                       |
+| `goodbye`     | Call wrap-up                                               |
 
 ## How a clip is chosen (first hit wins)
 
@@ -30,7 +31,8 @@ Each of these prompts plays a clip if one is found, else falls back to TTS:
      `<company-key>` is the dialed number's last 10 digits (matches
      `data/companies.csv`)
 
-Supported extensions, in preference order: `.mp3`, `.wav`, `.ogg`.
+Supported extensions, in preference order: `.mp3`, `.wav`. (Telnyx `<Play>` is
+unreliable with OGG — stick to MP3 or WAV.)
 
 ## Examples
 

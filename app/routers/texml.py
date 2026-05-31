@@ -128,13 +128,20 @@ def _from_display(dept_key: str, caller_name: str | None) -> str:
 
 def _voicemail(company: dict | None, dept_key: str, co: str,
                template: str = "voicemail.xml.j2") -> Response:
+    # The "no agents configured" case (unavailable.xml.j2) can have its own clip
+    # ("all agents are busy, leave your name and number…"); if none is set it falls
+    # back to the generic voicemail clip, then to TTS.
+    if "unavailable" in template:
+        audio_url = prompt_audio("unavailable", company, co) or prompt_audio("voicemail", company, co)
+    else:
+        audio_url = prompt_audio("voicemail", company, co)
     return _render(
         template,
         department=LABELS.get(dept_key, "us"),
         dept_key=dept_key,
         co=co,
         max_seconds=settings.voicemail_max_seconds,
-        audio_url=prompt_audio("voicemail", company, co),
+        audio_url=audio_url,
     )
 
 

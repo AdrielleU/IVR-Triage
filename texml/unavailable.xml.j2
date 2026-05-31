@@ -1,9 +1,14 @@
 {#- A menu option was chosen but no agents are configured for it. Goes to
-    voicemail so the caller isn't dropped. Variables: department, dept_key,
-    max_seconds, voice, base_url. -#}
+    voicemail so the caller isn't dropped. audio_url plays a recorded prompt
+    (e.g. "all our agents are busy, leave your name and number") instead of TTS.
+    Variables: department, dept_key, max_seconds, voice, base_url, audio_url. -#}
 <?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Say voice="{{ voice }}">Sorry, {{ department }} is not staffed right now. Please leave a message after the beep.</Say>
+{%- if audio_url %}
+  <Play>{{ audio_url }}</Play>
+{%- else %}
+  <Say voice="{{ voice }}">Sorry, all of our agents are busy right now. Please leave a message with your name and number after the beep, and we'll call you back soon.</Say>
+{%- endif %}
   <Record maxLength="{{ max_seconds }}" finishOnKey="#" playBeep="true"
           action="{{ base_url }}/texml/voicemail-done?dept={{ dept_key }}&amp;co={{ co }}" method="POST"
           recordingStatusCallback="{{ base_url }}/texml/recording?dept={{ dept_key }}&amp;co={{ co }}" />

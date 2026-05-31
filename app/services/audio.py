@@ -18,8 +18,9 @@ from pathlib import Path
 
 from app.config import settings
 
-# Common telephony-friendly audio containers, in preference order.
-AUDIO_EXTS = (".mp3", ".wav", ".ogg")
+# Formats Telnyx <Play> reliably supports, in preference order. (OGG is not
+# dependable on TeXML <Play>, so it's intentionally omitted — use MP3 or WAV.)
+AUDIO_EXTS = (".mp3", ".wav")
 
 
 def _is_url(value: str) -> bool:
