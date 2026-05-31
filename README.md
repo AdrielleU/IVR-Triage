@@ -118,6 +118,48 @@ uvicorn main:app --reload --port 8000
 ngrok http 8000               # put the https URL in BASE_URL
 ```
 
+## Exposing your self-hosted instance to Telnyx
+
+Telnyx must reach this app at a **public HTTPS URL** (its webhook). The app stays
+on your own box; you just need a public front door. Three ways, fastest first:
+
+| Option | Best for | Public URL | Open ports? |
+| --- | --- | --- | --- |
+| **ngrok** | Dev / quick test | random `*.ngrok.io` (static with paid plan) | no |
+| **Cloudflare Tunnel** | Production self-hosting | your own `ivr.yourdomain.com` | no |
+| **Tailscale Funnel / VPN + reverse proxy** | You already run a VPN / have a box with a public IP | your domain / `*.ts.net` | no (Funnel) / yes (port-forward) |
+
+**ngrok (fastest, for testing).** `ngrok http 8000`, copy the `https://…` URL into
+`BASE_URL`, and set it as the Telnyx TeXML webhook. The free URL changes on each
+restart (a paid static domain avoids that). Good for a demo, not for production.
+
+**Cloudflare Tunnel (recommended for real use).** A stable hostname, free, no
+inbound ports opened — `cloudflared` dials *out* to Cloudflare, so Telnyx reaches
+you through Cloudflare's edge. With the compose file:
+
+```bash
+# 1. Cloudflare Zero Trust dashboard → Networks → Tunnels → create a tunnel
+# 2. Add a Public Hostname: ivr.yourdomain.com  →  service http://ivr:8000
+# 3. Copy the tunnel token into .env as TUNNEL_TOKEN
+docker compose --profile tunnel up -d
+# BASE_URL=https://ivr.yourdomain.com  and point the Telnyx TeXML webhook there
+```
+
+Only the small HTTP webhook goes through Cloudflare — the call audio (SIP/RTP)
+never does, so the tunnel's HTTP-only nature is fine here. Add a WAF **skip rule
+for `/texml/*`** so bot protection doesn't block Telnyx (see Production notes).
+
+**Tailscale Funnel / VPN (if you already run one).** Tailscale Funnel publicly
+exposes a service on your tailnet over HTTPS (`tailscale funnel 8000`) — same idea
+as Cloudflare Tunnel, no ports opened. Or, if your box has a **public static IP**,
+put a reverse proxy (Caddy/nginx) with a Let's Encrypt cert in front of port 8000
+and forward 443 → the app. Whatever the resulting public HTTPS URL is goes into
+`BASE_URL` and the Telnyx webhook.
+
+> Whichever you pick, the value in `BASE_URL` **must** match the host Telnyx calls —
+> the app builds every callback URL (`/handle-input`, `/after-dial`, `/recording`)
+> from it.
+
 ## Test it
 
 ```bash
@@ -155,6 +197,33 @@ Contacts by `phone`/`mobilephone`; a match is logged and greeted by name. Store
 numbers in E.164 so they match what Telnyx sends. If unset or HubSpot is down,
 the call proceeds normally — the CRM is never on the critical path.
 
+## Voicemail — what to put, and when callers hear it
+
+Callers reach voicemail in three situations, each with its **own editable prompt
+template** (change the `<Say>` wording, or swap it for a `<Play>` of a recorded
+MP3 — the next call uses it, no restart):
+
+| When | Template | Default prompt |
+| --- | --- | --- |
+| Agents rang but nobody answered (after failover) | `texml/voicemail.xml.j2` | "Sorry, no one is available in {dept}. Leave a message after the beep…" |
+| A menu option has **no agents configured** | `texml/unavailable.xml.j2` | "Sorry, {dept} is not staffed right now. Leave a message…" |
+| **After business hours** with no on-call agents | `texml/after_hours.xml.j2` | "Our office is closed. Our hours are … Leave a message…" |
+
+A fourth, separate one is the **failover bin** (`texml/busy-voicemail-bin.example.xml`)
+— a static voicemail you paste into a Telnyx TeXML Bin and set as the Application's
+Failover URL, so callers can leave a message even when this app is down (see
+*Staying up* below).
+
+Controls:
+- `ENABLE_VOICEMAIL=true|false` — turn voicemail on/off (off = polite hang-up).
+- `VOICEMAIL_MAX_SECONDS=120` — max message length (billed as plain telephony time).
+- To use a **recorded greeting** instead of TTS, replace the `<Say>` line in a
+  template with `<Play>https://your-cdn/vm-greeting.mp3</Play>`.
+
+Where messages go: Telnyx records and **stores every voicemail on Telnyx** (Portal
+→ Reporting → Recordings, or via API). To also keep them locally with transcripts,
+see the next section.
+
 ## Recording, transcription & storage (no database)
 
 - **Disclosure** — `ANNOUNCE_RECORDING=true` plays "this call may be recorded for
@@ -181,9 +250,34 @@ the call proceeds normally — the CRM is never on the critical path.
   Files are organized by `year/month/day`; within a day the audio, transcript, and
   metadata share one base filename, so they're paired with no database. The
   top-level `index.csv` lists every call across all days with its relative path —
-  search it with grep/Excel. Transcription is local faster-whisper (`WHISPER_MODEL`:
-  tiny/base/small) — `base` ≈ a few seconds per voicemail on CPU. The `recordings/`
-  folder holds customer PII (gitignored).
+  search it with grep/Excel. The `recordings/` folder holds customer PII (gitignored).
+
+### How transcription works + resource use
+
+Transcription is **local faster-whisper** — no API, no per-minute cost, audio
+never leaves your server (good for the PII you're recording). It runs **after the
+call ends**, in a background thread, so it never delays the caller; it only
+affects how soon the `.txt` appears.
+
+Pick the model with `WHISPER_MODEL`. Costs are per voicemail on CPU (int8):
+
+| Model | Disk (one-time download) | RAM while loaded | Speed (30s clip) | Accuracy |
+| --- | --- | --- | --- | --- |
+| `tiny`  | ~75 MB  | ~0.5–1 GB | ~2–4 s   | OK |
+| `base`  | ~140 MB | ~1 GB     | ~4–8 s   | Good ← recommended |
+| `small` | ~460 MB | ~2 GB     | ~8–15 s  | Better |
+| `medium`| ~1.5 GB | ~5 GB     | slow on CPU | Great (use only with a GPU) |
+
+Practical notes:
+- The model loads into RAM on first use and **stays resident** — so the app's
+  memory rises by roughly the "RAM while loaded" figure once transcription starts.
+- A transcription pins **~1 CPU core** for its duration; jobs run one at a time, so
+  simultaneous voicemails queue (fine at low volume). On a **2 vCPU / 2–4 GB** box,
+  `base` leaves a core free for webhooks.
+- First run downloads the model once (cached afterward). Bake it into the image
+  with `docker build --build-arg INSTALL_TRANSCRIBE=true`.
+- No spare CPU/RAM? Set `TRANSCRIBE_ENABLED=false` and use a cloud STT (e.g. Groq's
+  free Whisper tier) on the stored audio instead — same files, offloaded compute.
 
 ## Staying up: monitoring + failover
 
