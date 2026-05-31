@@ -31,32 +31,41 @@ double-bills.
    `{timestamp}|{raw_body}`. Read the raw body before parsing the form (see
    `app/security.verified_form`), because FastAPI consumes a form body before
    dependencies run.
-4. **Keep the menu short.** Every billed second counts; silent calls hang up via
-   the Gather `timeout`, they don't loop.
+4. **Keep the menu short, and bound every loop.** Every billed second counts. No
+   path loops forever: failover climbs a finite `stage` list; the menu caps
+   no-input/invalid re-prompts at `MAX_MENU_ATTEMPTS` (then terminates); the busy
+   prompt caps repeats at `BUSY_PROMPT_REPEATS` (then `fallback_action`).
 
 ## Layout
 
 ```
-main.py                  # FastAPI app + /health
-app/config.py            # env-driven Settings (extra vars ignored)
+main.py                  # FastAPI app + /health + StaticFiles /audio mount
+app/config.py            # env-driven Settings (base_url trailing slash stripped)
 app/security.py          # verified_form(): Ed25519 verify + form parse
 app/routers/texml.py     # routing logic; renders templates; failover staging
+app/services/companies.py# To -> data/companies.csv row (name,label,ai id,fallback_action,agents)
 app/services/contacts.py # caller match: local CSV first, optional HubSpot fallback
 app/services/schedule.py # business hours from data/hours.csv + holidays.csv
-app/services/datafiles.py# mtime-cached CSV loader
+app/services/datafiles.py# mtime-cached CSV loader (degrades on any OSError)
 app/services/routing.py  # data/routing.csv roster -> ordered ring stages per dept
+app/services/options.py  # data/options.csv -> busy-prompt keypress options
+app/services/audio.py    # prompt_audio(): recorded-clip resolver (local /audio or URL)
+app/services/calllog.py  # LOG_CALLS: append one JSON line per call event
+app/services/recordings.py # save/transcribe recordings (locked index.csv append)
 app/services/hubspot.py  # HubSpot API (sync script + optional live fallback)
 scripts/sync_hubspot.py  # HubSpot contacts -> data/contacts.csv
-texml/*.xml.j2           # EDITABLE call XML (Jinja2, auto_reload=True)
+texml/*.xml.j2           # EDITABLE call XML (Jinja2, auto_reload=True), incl. closing.xml.j2
 texml/connect-ai.xml.j2  # <Connect><AIAssistant> handoff (same leg, no extra leg/fee)
-data/*.csv               # EDITABLE contacts.csv / hours.csv / holidays.csv (mtime-cached)
+data/*.csv               # EDITABLE companies/routing/options/contacts/hours/holidays (mtime-cached)
+audio/                   # OPTIONAL recorded prompt clips, served at /audio (bind-mounted)
 Dockerfile  docker-compose.yml  requirements.txt  README.md  .env.example
 ```
 
 Multi-tenant: one deployment serves many companies, keyed by the dialed number
 (`To`). `app/services/companies.py` resolves `To` -> a `data/companies.csv` row
-(name, menu_audio_url, per-dept agents/fallback); no match -> single-tenant env
-config. The company key (normalized digits) is threaded through callbacks as the
+(name, `label`, `ai_assistant_id`, `fallback_action`, menu_audio_url, per-dept
+agents/fallback; columns matched by name, extras ignored); no match -> single-tenant
+env config. The company key (normalized digits) is threaded through callbacks as the
 `co` query param so after-dial/recording resolve the right tenant. Don't put the
 whole company row in URLs — re-resolve via `co`.
 
@@ -66,7 +75,8 @@ Public holidays are computed by the `holidays` lib (`HOLIDAY_COUNTRY`/`SUBDIV`,
 correct floating/observed dates per year); `data/holidays.csv` is ONLY for
 company-specific closures on top. Don't hard-code standard holidays. Both `texml/` and `data/` are volume-mounted in compose so
 edits apply with no restart. Routing fails over in stages, advanced by
-/texml/after-dial on a non-`completed` DialCallStatus, ending in voicemail.
+/texml/after-dial on a non-`completed` DialCallStatus, ending in the busy/voicemail
+prompt (then the company's `fallback_action`).
 A department's stages are resolved by `_stages()` first-hit-wins:
 `data/routing.csv` (per-agent roster) -> `data/companies.csv` columns ->
 `<KEY>_agents`/`<KEY>_fallback` env. Caller match is local-CSV-first; the HubSpot
@@ -105,17 +115,27 @@ autoescape protects against a caller name / company breaking the document.
 ## Endpoints
 
 - `GET/POST /texml/menu` — entry: business-hours gate, then direct-line auto-ring
-  (if a `direct` chain is configured) else CRM lookup, greeting + gather.
+  (if a `direct` chain is configured) else CRM lookup, greeting + gather (5s). A
+  no-input timeout `<Redirect>`s back here with `attempt+1`; invalid keys do the
+  same via `invalid.xml.j2`. Capped at `MAX_MENU_ATTEMPTS` plays, then the menu
+  **terminates** (`closing.xml.j2`) — the menu never falls to voicemail/AI.
 - `POST /texml/handle-input` — rings the chosen department's agents (`<Dial>` of
-  SIP URIs and/or PSTN numbers from `<KEY>_agents`). Digit `4` is special: when
-  an `ai_assistant_id` is configured it renders `connect-ai.xml.j2`
-  (`<Connect><AIAssistant>`) instead of dialing — assistant on the same leg. The
-  caller is re-resolved via `lookup_caller` so the agent's softphone shows
-  `<Department> - <Name>` (CRM match) as the SIP caller-ID display name
-  (`<Dial fromDisplayName>`, sanitized to Telnyx's allowed charset — no colon);
-  the caller's own number stays as the callerId for callback. Same on failover.
-- `GET/POST /texml/after-dial` — post-dial: answered → goodbye; no-answer → voicemail.
+  SIP URIs and/or PSTN numbers). Digit `4` is special: when an `ai_assistant_id` is
+  configured it renders `connect-ai.xml.j2` (`<Connect><AIAssistant>`) instead of
+  dialing — assistant on the same leg. The caller is re-resolved via `lookup_caller`
+  so the agent's softphone shows **`LABEL-GRP-Who`** as the SIP caller-ID display
+  name (`_from_display`: company `label`, first 3 letters of the dept, then the
+  matched contact name else the caller's number with country code stripped;
+  sanitized to Telnyx's charset — no colon). The caller's own number stays the
+  callerId for callback. Same on failover.
+- `GET/POST /texml/after-dial` — post-dial: answered → goodbye; otherwise fail over
+  to the next ring stage, then (out of stages) the busy/voicemail prompt.
+- `POST /texml/vm-option` — busy-prompt keypress: a configured `options.csv` digit
+  routes via `_route_to` (AI / department / number / voicemail); a no-press timeout
+  or unmapped key re-prompts up to `BUSY_PROMPT_REPEATS`, then `_fallback_response`
+  (the company's `fallback_action`: voicemail | ai | close).
 - `POST /texml/voicemail-done`, `POST /texml/recording` — voicemail capture + URL log.
+- `GET /audio/*` — StaticFiles serving recorded prompt clips (never serves recordings/).
 - `GET /health` — health check.
 
 Agents are SIP softphones registered to `sip.telnyx.com` (Telnyx is the SIP
@@ -165,8 +185,22 @@ from the assistant's tools, not by wrapping the assistant in a `<Dial>`.
 - `HUBSPOT_TOKEN` (optional) — enables caller matching.
 - `MENU_AUDIO_URL` (optional) — pre-recorded greeting, skips per-call TTS.
 - `AI_ASSISTANT_ID` (optional) — Telnyx AI Assistant id; enables the "press 4"
-  single-leg AI handoff. `AI_INTRO_AUDIO_URL` (optional) plays a pre-recorded
-  "connecting you…" clip instead of TTS before the `<Connect>`.
+  single-leg AI handoff (and the `ai` routing/option sentinel). `AI_INTRO_AUDIO_URL`
+  (optional) plays a pre-recorded "connecting you…" clip instead of TTS.
+- `FALLBACK_ACTION` (optional, default `voicemail`) — what a non-responsive caller
+  gets once they've CHOSEN a department: `voicemail` | `ai` | `close`. Per-company:
+  companies.csv `fallback_action`. `BUSY_PROMPT_REPEATS` (default 2) bounds the
+  busy-prompt repeats before it.
+- `COMPANY_LABEL` (optional) — tenant code for the `LABEL-GRP-Who` agent display
+  (per-company: companies.csv `label`).
+- `DIRECT_AGENTS` / `DIRECT_FALLBACK` (optional) — single-tenant direct-line chain
+  (per-number: a `direct` department in routing.csv).
+- `LOG_CALLS` (optional) — append each call event to `CALL_LOG_PATH` (JSON-Lines).
+- Recorded prompts (optional): `VOICEMAIL_AUDIO_URL`, `UNAVAILABLE_AUDIO_URL`,
+  `AFTER_HOURS_AUDIO_URL`, `INVALID_AUDIO_URL`, `GOODBYE_AUDIO_URL`, or drop files
+  in `audio/` (see `audio/README.md`).
+- Recording (optional): `ANNOUNCE_RECORDING`, `RECORD_CALLS`, `SAVE_RECORDINGS`,
+  `TRANSCRIBE_ENABLED` (needs the `INSTALL_TRANSCRIBE=true` image build).
 - Business hours (optional): `ENFORCE_BUSINESS_HOURS`, `BUSINESS_TIMEZONE`,
   `BUSINESS_OPEN_HOUR`, `BUSINESS_CLOSE_HOUR`, `BUSINESS_DAYS` (Mon=0..Sun=6),
   `AFTER_HOURS_AGENTS`.
