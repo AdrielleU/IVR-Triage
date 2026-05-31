@@ -69,6 +69,13 @@ number — you should hear the menu.
 > the hop to your container stays internal), so you can remove the `ports:` block
 > in `docker-compose.yml` for a tunnel-only deploy. No Caddy/nginx needed.
 
+> **Podman on SELinux (RHEL/Fedora)?** Bind mounts need an SELinux relabel or the
+> container hits `Permission denied` on `data/`. Add `:z` to the volume lines in
+> `docker-compose.yml` (e.g. `./data:/app/data:ro,z`). For a one-off `podman run`
+> (not compose), also add `--userns=keep-id` so the container's uid can read your
+> files. Both are **podman-only concerns** — on plain Docker `:z` is a harmless
+> no-op and `--userns=keep-id` is not a valid flag.
+
 See [`.env.example`](.env.example) for the full list of settings (caller
 matching, business hours, recording, the optional AI handoff).
 

@@ -26,6 +26,9 @@ def load_cached(name: str, parser: Callable[[Path], object]):
     try:
         mtime = path.stat().st_mtime
     except FileNotFoundError:
+        return None  # an optional data file simply isn't there — expected, no log
+    except OSError as exc:  # PermissionError, etc. — degrade gracefully, never 500 a live call
+        log.warning("Cannot stat %s: %s", path, exc)
         return None
 
     cached = _cache.get(name)

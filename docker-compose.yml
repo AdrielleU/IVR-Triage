@@ -3,6 +3,12 @@
 #   docker compose --profile tunnel up -d --build # app + Cloudflare Tunnel (TUNNEL_TOKEN in .env)
 #   docker compose logs -f ivr                   # watch call logs
 #
+# PODMAN + SELinux (e.g. RHEL/Fedora) users: bind mounts need an SELinux relabel
+# or the container gets "Permission denied" on data/. Either add `:z` to the
+# volume lines below (e.g. ./data:/app/data:ro,z) or run with the relabel done
+# for you. On plain Docker the `:z` suffix is a harmless no-op, so it's safe to
+# leave in. (`--userns=keep-id` is podman-only and NOT valid on Docker.)
+#
 # VOLUMES — three things are mounted from the host so you can change them WITHOUT
 # rebuilding the image:
 #   ./texml       IVR / voicemail XML templates   (read-only; edit -> next call uses it)
