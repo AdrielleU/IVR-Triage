@@ -185,6 +185,35 @@ Where those destinations come from is resolved **first-hit-wins**:
 the `*_AGENTS` / `*_FALLBACK` env vars. So you can adopt the roster gradually —
 departments without a routing row keep using your existing config.
 
+## Direct lines (no IVR menu)
+
+Some numbers shouldn't play a menu at all — a person's direct line should just
+**ring them**. Give a number a **`direct`** ring chain and it skips the menu
+entirely: the call plays that number's greeting, then auto-rings the chain
+(SIP → personal line) and lands in voicemail if nobody answers — exactly the
+same failover as a department, just with no keypress.
+
+A number **without** a `direct` chain still shows the normal menu, so one
+deployment mixes both: menu lines and direct lines side by side.
+
+```csv
+# data/routing.csv — "direct" department = a direct line for that number
+company,department,name,destination,extension,priority,active
+4155559999,direct,Bob (SIP),sip:bob@sip.telnyx.com,,1,true
+4155559999,direct,Bob (personal cell),+14155551212,,2,true
+```
+
+That rings Bob's softphone first, fails over to his cell, then voicemail. Add a
+greeting with `audio/4155559999/menu.mp3` (or a `menu_audio_url`); without one it
+says a short "Please hold while we connect you." A **single** direct-line
+deployment can skip routing.csv and just set `DIRECT_AGENTS` / `DIRECT_FALLBACK`
+in `.env`.
+
+A `direct` line must list at least one destination — that non-empty chain is what
+flags the number as "direct" (no chain → it just shows the normal menu). A
+**ring-nobody, straight-to-voicemail** line isn't supported by an empty chain
+today; it would need a small follow-up (a `voicemail` sentinel destination).
+
 ## Agent roster (`data/routing.csv`) — optional, recommended
 
 Instead of packing agents into `companies.csv` cells, keep a clean **one-row-per-

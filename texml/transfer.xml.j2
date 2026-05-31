@@ -2,10 +2,21 @@
     action callback (/texml/after-dial) fails over to the next stage or voicemail.
     from_display is the SIP caller-ID name the agent's phone shows ("Sales - Jane
     Doe"); the caller's own number stays as the callerId for callback.
-    Variables: department, destinations[], dial_timeout, from_display, action_url, voice. -#}
+    intro_audio_url / intro_text override the spoken "Connecting you to <dept>"
+    line (a direct line plays its own greeting here before auto-ringing).
+    Variables: department, destinations[], dial_timeout, from_display, action_url,
+    voice, intro_audio_url, intro_text. -#}
 <?xml version="1.0" encoding="UTF-8"?>
 <Response>
+{%- if intro_audio_url %}
+  <Play>{{ intro_audio_url }}</Play>
+{%- elif intro_text %}
+  <Say voice="{{ voice }}">{{ intro_text }}</Say>
+{%- elif department and department != 'us' %}
   <Say voice="{{ voice }}">Connecting you to {{ department }}. Please hold.</Say>
+{%- else %}
+  <Say voice="{{ voice }}">Please hold while we connect you.</Say>
+{%- endif %}
   <Dial timeout="{{ dial_timeout }}"{% if from_display %} fromDisplayName="{{ from_display }}"{% endif %} action="{{ action_url }}" method="POST"{% if record_calls %} record="record-from-answer" recordingStatusCallback="{{ recording_callback }}"{% endif %}>
 {%- include "_dial.xml.j2" %}
   </Dial>

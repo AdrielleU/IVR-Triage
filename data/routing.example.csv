@@ -8,3 +8,5 @@ company,department,name,destination,extension,priority,active
 ,operator,Front Desk,sip:frontdesk@sip.telnyx.com,100,1,true
 18005550001,sales,Acme Alice,sip:acme-alice@sip.telnyx.com,201,1,true
 18005550001,support,Acme AI Bot,assistant-9f1c2a30-aaaa-bbbb-cccc-1234567890ab,,1,true
+14155559999,direct,Bob (SIP),sip:bob@sip.telnyx.com,,1,true
+14155559999,direct,Bob (personal cell),+14155551212,,2,true

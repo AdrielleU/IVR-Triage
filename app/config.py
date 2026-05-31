@@ -30,6 +30,14 @@ class Settings(BaseSettings):
     operator_agents: str = ""
     after_hours_agents: str = ""
 
+    # Direct line: when a number has a `direct` ring chain configured (here, or a
+    # companies.csv `direct_agents`/`direct_fallback` column, or a routing.csv
+    # `direct` department), it is treated as a DIRECT LINE — no IVR menu. The call
+    # plays the number's greeting and auto-rings this chain (SIP first, then the
+    # personal-line fallback), then voicemail. Leave empty for a normal menu/IVR.
+    direct_agents: str = ""
+    direct_fallback: str = ""
+
     # Auto-forward failover: if the agents above don't answer (e.g. a SIP
     # softphone is offline), ring these PSTN backups next, then voicemail.
     sales_fallback: str = ""

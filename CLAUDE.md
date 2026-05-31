@@ -72,6 +72,13 @@ A department's stages are resolved by `_stages()` first-hit-wins:
 `<KEY>_agents`/`<KEY>_fallback` env. Caller match is local-CSV-first; the HubSpot
 API is only touched by the sync script or when HUBSPOT_LIVE_FALLBACK is on.
 
+A `direct` department is special: when a dialed number has a non-empty `direct`
+chain (`/texml/menu` checks `_stages(company,"direct",co)`), the call is a DIRECT
+LINE — it skips the DTMF menu, plays the number's greeting, and auto-rings that
+chain (SIP -> personal-line fallback -> voicemail) with no keypress. No `direct`
+chain -> normal menu, so one deployment mixes menu lines and direct lines. The
+greeting reuses the per-prompt audio convention (`audio/<co>/menu.mp3`).
+
 `data/routing.csv` (`app/services/routing.py`) is the top routing layer — one row
 per destination: `company,department,name,destination,extension,priority,active`.
 Rows with the same `priority` ring together; higher priorities are later
@@ -94,7 +101,8 @@ autoescape protects against a caller name / company breaking the document.
 
 ## Endpoints
 
-- `GET/POST /texml/menu` — entry: business-hours gate, CRM lookup, greeting + gather.
+- `GET/POST /texml/menu` — entry: business-hours gate, then direct-line auto-ring
+  (if a `direct` chain is configured) else CRM lookup, greeting + gather.
 - `POST /texml/handle-input` — rings the chosen department's agents (`<Dial>` of
   SIP URIs and/or PSTN numbers from `<KEY>_agents`). Digit `4` is special: when
   an `ai_assistant_id` is configured it renders `connect-ai.xml.j2`

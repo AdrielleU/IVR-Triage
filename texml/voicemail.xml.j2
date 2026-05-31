@@ -6,7 +6,7 @@
 {%- if audio_url %}
   <Play>{{ audio_url }}</Play>
 {%- else %}
-  <Say voice="{{ voice }}">Sorry, no one is available in {{ department }} right now. Please leave a message after the beep, then press pound or hang up.</Say>
+  <Say voice="{{ voice }}">Sorry, no one is available{% if department and department != 'us' %} in {{ department }}{% endif %} right now. Please leave a message after the beep, then press pound or hang up.</Say>
 {%- endif %}
   <Record maxLength="{{ max_seconds }}" finishOnKey="#" playBeep="true"
           action="{{ base_url }}/texml/voicemail-done?dept={{ dept_key }}&amp;co={{ co }}" method="POST"

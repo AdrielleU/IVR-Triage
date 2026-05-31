@@ -139,13 +139,17 @@ def _voicemail(company: dict | None, dept_key: str, co: str,
 
 
 def _dial_stage(company: dict | None, dept_key: str, stage: int, co: str,
-                caller_name: str | None = None) -> Response:
+                caller_name: str | None = None,
+                intro_audio_url: str | None = None,
+                intro_text: str | None = None) -> Response:
     """Ring the given stage's destinations; past the last stage -> voicemail.
 
     The <Dial> action points back at /texml/after-dial with the stage and the
     company key (`co`), so a no-answer fails over to the next stage for the right
     company even if the callback omits the dialed number. caller_name (matched in
-    the CRM) is shown to the agent as the SIP caller-ID display name.
+    the CRM) is shown to the agent as the SIP caller-ID display name. intro_audio_url
+    / intro_text override the default "Connecting you to <dept>" line — used by a
+    direct line to play its own greeting before auto-ringing.
     """
     stages = _stages(company, dept_key, co)
     if stage >= len(stages):
@@ -167,6 +171,8 @@ def _dial_stage(company: dict | None, dept_key: str, stage: int, co: str,
         action_url=f"{settings.base_url}/texml/after-dial?dept={dept_key}&stage={stage}&co={co}",
         record_calls=settings.record_calls,
         recording_callback=f"{settings.base_url}/texml/recording?dept={dept_key}&co={co}",
+        intro_audio_url=intro_audio_url,
+        intro_text=intro_text,
     )
 
 
@@ -192,6 +198,20 @@ async def initial_menu(request: Request):
             open_hour=settings.business_open_hour,
             close_hour=settings.business_close_hour,
             audio_url=prompt_audio("after_hours", company, co),
+        )
+
+    # Direct line (no IVR): a number with a `direct` ring chain configured skips the
+    # menu entirely — play its greeting, then auto-ring SIP -> personal line ->
+    # voicemail. A number without a `direct` chain falls through to the menu below.
+    if _stages(company, "direct", co):
+        contact = await lookup_caller(From)
+        log.info("Direct line: from=%s to=%s company=%r -> auto-ring (no menu)",
+                 From, To, _company_name(company))
+        return _dial_stage(
+            company, "direct", 0, co,
+            caller_name=contact["name"] if contact else None,
+            intro_audio_url=prompt_audio("menu", company, co),
+            intro_text="Please hold while we connect you.",
         )
 
     contact = await lookup_caller(From)
