@@ -1,11 +1,16 @@
-# Telnyx Phone IVR (no-AI, cost-optimized)
+# Telnyx Phone IVR (cost-optimized, optional AI handoff)
 
 A small FastAPI app that serves a **TeXML** IVR for a Telnyx number. Callers hear
 a menu (1 sales / 2 support / 3 billing / 0 operator), get rung through to your
 agents (SIP softphones or phone numbers), and land in **voicemail** if nobody
-answers. No AI voice — calls ride plain telephony minutes (~$0.01/min), not AI
-minutes ($0.05–0.08/min). Inbound callers are matched against HubSpot by phone
+answers. Human routing rides **plain telephony minutes** (~$0.002/min/leg + SIP
+trunk fee), not AI minutes. Inbound callers are matched against HubSpot by phone
 so they're logged and greeted by name.
+
+Optionally, set `AI_ASSISTANT_ID` to add a **"press 4" handoff to a Telnyx AI
+Assistant**. It uses `<Connect><AIAssistant>`, which runs the assistant on the
+**same call leg** — so it adds only the ~$0.05/min AI minute, with **no second
+telephony leg** (see *AI Assistant handoff* below).
 
 All the call XML lives in **editable templates** under `texml/` — change a
 greeting, menu, or voicemail prompt and the next call uses it, no restart.
@@ -23,6 +28,10 @@ Telnyx ──webhook──► /texml/handle-input   (rings that department's age
       │  no one answers (or none configured)
       ▼
 Telnyx ──webhook──► /texml/after-dial  ──► voicemail (<Record>) ──► /texml/recording (URL logged)
+
+      (optional) caller presses 4
+      ▼
+/texml/handle-input ──► <Connect><AIAssistant>   (assistant on the SAME leg; no <Dial>, no extra leg/fee)
 ```
 
 Audio (SIP/RTP) flows **between the agents' softphones and Telnyx** — it never
@@ -41,6 +50,7 @@ app/services/hubspot.py  # HubSpot API (used by sync + optional live fallback)
 scripts/sync_hubspot.py  # download HubSpot contacts -> data/contacts.csv
 texml/                   # EDITABLE call XML (Jinja2, auto-reloaded)
   menu / transfer / voicemail / after_hours / goodbye / invalid / unavailable
+  connect-ai             # optional <Connect><AIAssistant> handoff (same leg)
 data/                    # EDITABLE operational data (mtime-cached)
   contacts.csv  hours.csv  holidays.csv
 Dockerfile  docker-compose.yml  requirements.txt  .env.example
@@ -67,13 +77,15 @@ Application can serve many companies. Copy `data/companies.example.csv` →
 `data/companies.csv` and list each number:
 
 ```csv
-number,name,menu_audio_url,sales_agents,support_agents,billing_agents,operator_agents,sales_fallback,...
-+18005550001,Acme Inc,,sip:acme1@sip.telnyx.com;sip:acme2@sip.telnyx.com,sip:acme1@sip.telnyx.com,+1...,+1...,+1...
-+18005550002,Globex,https://cdn/globex.mp3,sip:globex1@sip.telnyx.com,...
+number,name,menu_audio_url,ai_assistant_id,sales_agents,support_agents,billing_agents,operator_agents,sales_fallback,...
++18005550001,Acme Inc,,,sip:acme1@sip.telnyx.com;sip:acme2@sip.telnyx.com,sip:acme1@sip.telnyx.com,+1...,+1...,+1...
++18005550002,Globex,https://cdn/globex.mp3,assistant-776d…,sip:globex1@sip.telnyx.com,...
 ```
 
 Each company gets its own greeting (its `name` in the TTS prompt, or its own
-`menu_audio_url` recording) and its own per-department agents/failover. Multiple
+`menu_audio_url` recording), an optional per-company `ai_assistant_id` (enables
+that company's "press 4" AI handoff), and its own per-department agents/failover.
+Multiple
 agents in one cell are separated by `;`. A call to a listed number uses that
 company's row; an unlisted number falls back to the single-tenant `*_AGENTS` env
 vars. Recordings are tagged with the company (filename + `index.csv` column).
@@ -189,6 +201,49 @@ caller number, CRM match, menu choice, dial result, and voicemail URL.
 
 You'll have **1 TeXML Application** (HTTP webhooks — your app) and **2 SIP
 credentials** (your agents). The app is not a SIP connection; it never speaks SIP.
+
+## AI Assistant handoff (optional)
+
+Add a "press 4 to speak with our virtual assistant" option that hands the caller
+to a **Telnyx AI Assistant** — without ever getting billed for two call legs.
+
+**Why it's cheap (the billing point).** Telnyx bills *per leg, per minute*, and
+**every leg alive at the same time meters separately**. A `<Dial>` to an AI
+behind a phone number would open a *second* concurrent leg (two telephony meters)
+— the "charged twice" trap, and it would need a separate DID for the AI. This app
+instead uses `<Connect><AIAssistant>`, which attaches the assistant to the
+**existing** leg:
+
+```xml
+<Connect>
+  <AIAssistant id="assistant-…"/>
+</Connect>
+```
+
+So during the AI conversation you pay just the one inbound leg (~$0.002/min + SIP
+trunk fee) **+ ~$0.05/min** for the AI — no extra leg.
+
+**Setup:**
+1. In Mission Control → **AI Assistants**, create an assistant. Configure its
+   **voice, greeting, system instructions, and its transfer-to-human tool** there
+   — all of that lives on the assistant, not in this app's XML. Copy its id
+   (`assistant-…`).
+2. Set `AI_ASSISTANT_ID=assistant-…` in `.env` (or the per-company
+   `ai_assistant_id` column in `companies.csv`). Optionally set
+   `AI_INTRO_AUDIO_URL` to play a recorded "connecting you…" clip instead of TTS.
+3. That's it — the menu now offers "press 4". With the id unset, the option
+   doesn't appear and behavior is unchanged.
+
+**Escalating to a human** is the assistant's own job (its transfer tool), kept
+out of this app. If that escalation uses a SIP-REFER transfer, that's the one
+place Telnyx's **$0.10 REFER surcharge** can apply — only when it actually hands
+off. Don't wrap the assistant in a `<Dial>`; that reintroduces the double-leg.
+
+> **Note on the $0.10 fee:** it applies to the Call Control **SIP-REFER**
+> `transfer` command, *not* to the TeXML `<Dial>` verb this app uses for normal
+> IVR→agent routing. A routine "press 1 → ring sales" handoff is **not**
+> surcharged — you just pay the (cheap) per-minute legs. Confirm on your first
+> invoice.
 
 ## HubSpot caller matching (optional)
 

@@ -5,9 +5,10 @@ data/companies.csv (optional) is keyed by number; if it's absent or the dialed
 number isn't listed, callers fall back to the single-tenant env config, so existing
 single-company setups keep working unchanged.
 
-CSV header (multiple agents in a cell separated by ; to avoid CSV comma clashes):
-    number,name,menu_audio_url,sales_agents,support_agents,billing_agents,operator_agents,sales_fallback,support_fallback,billing_fallback,operator_fallback
-    +18005550001,Acme Inc,,sip:a1@sip.telnyx.com;sip:a2@sip.telnyx.com,sip:a1@sip.telnyx.com,+14155550101,+14155550100,+14155550111,,,
+CSV header (multiple agents in a cell separated by ; to avoid CSV comma clashes).
+An optional `ai_assistant_id` column enables this company's "press 4" AI handoff:
+    number,name,menu_audio_url,ai_assistant_id,sales_agents,support_agents,billing_agents,operator_agents,sales_fallback,support_fallback,billing_fallback,operator_fallback
+    +18005550001,Acme Inc,,assistant-776d...,sip:a1@sip.telnyx.com;sip:a2@sip.telnyx.com,sip:a1@sip.telnyx.com,+14155550101,+14155550100,+14155550111,,,
 """
 
 import csv

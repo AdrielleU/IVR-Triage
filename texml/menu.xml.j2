@@ -1,5 +1,6 @@
 {#- Main IVR menu. Edit the wording / options freely; the next call uses it.
-    Available variables: caller_name (or None), voice, base_url, menu_audio_url. -#}
+    Available variables: caller_name (or None), voice, base_url, menu_audio_url,
+    ai_enabled (offer the AI-assistant option), announce_recording. -#}
 <?xml version="1.0" encoding="UTF-8"?>
 <Response>
 {%- if announce_recording %}
@@ -9,7 +10,7 @@
 {%- if menu_audio_url %}
     <Play>{{ menu_audio_url }}</Play>
 {%- else %}
-    <Say voice="{{ voice }}">{% if caller_name %}Welcome back, {{ caller_name }}. {% endif %}Thank you for calling{% if company_name %} {{ company_name }}{% endif %}. For sales, press 1. For technical support, press 2. For billing or account questions, press 3. To speak with an operator, press 0.</Say>
+    <Say voice="{{ voice }}">{% if caller_name %}Welcome back, {{ caller_name }}. {% endif %}Thank you for calling{% if company_name %} {{ company_name }}{% endif %}. For sales, press 1. For technical support, press 2. For billing or account questions, press 3. To speak with an operator, press 0.{% if ai_enabled %} Or to speak with our virtual assistant, press 4.{% endif %}</Say>
 {%- endif %}
   </Gather>
   <Say voice="{{ voice }}">We did not receive a selection. Goodbye.</Say>

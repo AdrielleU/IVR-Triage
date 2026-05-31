@@ -1,18 +1,30 @@
-# CLAUDE.md — Telnyx Phone IVR (no-AI, cost-optimized)
+# CLAUDE.md — Telnyx Phone IVR (cost-optimized, optional AI handoff)
 
 ## What this is
 
 A small FastAPI app serving a **TeXML** IVR for a Telnyx phone number. Callers
 hear a DTMF menu (1 sales / 2 support / 3 billing / 0 operator) and are
-transferred to the right human team. **No AI voice** — calls ride plain
-telephony minutes, not AI minutes. Inbound callers are matched to HubSpot by
-phone so they can be logged and greeted by name.
+transferred to the right human team on **plain telephony minutes** — the human
+routing never touches metered AI minutes. Inbound callers are matched to HubSpot
+by phone so they can be logged and greeted by name.
+
+Optionally, setting `AI_ASSISTANT_ID` adds a **"press 4" handoff to a Telnyx AI
+Assistant**. This is the one path that uses AI minutes, and it's deliberately
+built to stay single-leg (see "AI Assistant handoff" below) so it never
+double-bills.
 
 ## Design constraints (do not regress)
 
-1. **No AI voice.** AI Assistant minutes cost $0.05–0.08/min vs ~$0.01/min for
-   plain telephony. The whole point is to avoid them. Don't reintroduce
-   `<Connect><AI>` unless explicitly asked.
+1. **AI voice is opt-in and single-leg only.** AI Assistant minutes cost
+   ~$0.05/min on top of telephony, so human routing stays AI-free by default.
+   The *only* sanctioned AI path is the `AI_ASSISTANT_ID` "press 4" handoff,
+   which uses `<Connect><AIAssistant>` to attach the assistant to the **existing**
+   call leg. Never reach an assistant (or any transfer target) with a `<Dial>` to
+   a phone number: a `<Dial>` originates a *second concurrent leg*, so you pay two
+   metered telephony legs at once ("charged twice"). `<Connect>` adds no second
+   leg — only the AI minute. Don't add `<Connect><AI>` (the old inline form) or
+   dial-based AI. (The separate $0.10 SIP-REFER transfer surcharge is not incurred
+   by TeXML `<Dial>` — it bridges, it doesn't REFER; see the cost cheat-sheet.)
 2. **The CRM is never on the critical path.** `lookup_caller` has a 2s timeout
    and returns `None` on any error — a slow/down HubSpot must never block a call.
 3. **Webhooks must be verifiable.** Telnyx signs with Ed25519 over
@@ -35,6 +47,7 @@ app/services/datafiles.py# mtime-cached CSV loader
 app/services/hubspot.py  # HubSpot API (sync script + optional live fallback)
 scripts/sync_hubspot.py  # HubSpot contacts -> data/contacts.csv
 texml/*.xml.j2           # EDITABLE call XML (Jinja2, auto_reload=True)
+texml/connect-ai.xml.j2  # <Connect><AIAssistant> handoff (same leg, no extra leg/fee)
 data/*.csv               # EDITABLE contacts.csv / hours.csv / holidays.csv (mtime-cached)
 Dockerfile  docker-compose.yml  requirements.txt  README.md  .env.example
 ```
@@ -66,7 +79,9 @@ autoescape protects against a caller name / company breaking the document.
 
 - `GET/POST /texml/menu` — entry: business-hours gate, CRM lookup, greeting + gather.
 - `POST /texml/handle-input` — rings the chosen department's agents (`<Dial>` of
-  SIP URIs and/or PSTN numbers from `<KEY>_agents`).
+  SIP URIs and/or PSTN numbers from `<KEY>_agents`). Digit `4` is special: when
+  an `ai_assistant_id` is configured it renders `connect-ai.xml.j2`
+  (`<Connect><AIAssistant>`) instead of dialing — assistant on the same leg.
 - `GET/POST /texml/after-dial` — post-dial: answered → goodbye; no-answer → voicemail.
 - `POST /texml/voicemail-done`, `POST /texml/recording` — voicemail capture + URL log.
 - `GET /health` — health check.
@@ -74,6 +89,37 @@ autoescape protects against a caller name / company breaking the document.
 Agents are SIP softphones registered to `sip.telnyx.com` (Telnyx is the SIP
 server; the app never speaks SIP — it only returns `<Dial><Sip>`). RTP/SIP never
 transits this app or Cloudflare; only the HTTP webhooks do.
+
+## AI Assistant handoff (billing-critical)
+
+Opt-in via `AI_ASSISTANT_ID` (per-company: companies.csv `ai_assistant_id`).
+When set, the menu offers "press 4" and `/texml/handle-input` renders
+`connect-ai.xml.j2`:
+
+```xml
+<Connect>
+  <AIAssistant id="assistant-…"/>
+</Connect>
+```
+
+Why `<Connect>` and not `<Dial>` — the whole point:
+
+- `<Connect><AIAssistant>` runs the assistant **on the current inbound leg**. No
+  second telephony leg. Cost during the AI conversation is just the one inbound
+  leg (~$0.002/min + SIP-trunk fee) **+ ~$0.05/min AI**.
+- A `<Dial>` to an AI behind a phone number would run **two** metered legs
+  concurrently — the "charged twice" trap. (It also needs a separate DID for the
+  AI.) Don't.
+
+The assistant referenced by `id` owns everything about the conversation —
+**voice, greeting, system instructions, and its own transfer-to-human tool** —
+configured on the AI Assistant resource (Mission Control portal or the AI
+Assistant API), NOT in this XML. The template passes only the `id` plus an
+optional `AI_INTRO_AUDIO_URL` / TTS "connecting you…" line. So escalating from
+the AI to a human is the assistant's job, kept out of this app — and if that
+escalation uses a SIP-REFER transfer it's the one place the $0.10 surcharge can
+appear. Keep this path single-leg; if you ever need to bridge a human in, do it
+from the assistant's tools, not by wrapping the assistant in a `<Dial>`.
 
 ## Configuration (`.env`; see `.env.example`)
 
@@ -86,6 +132,9 @@ transits this app or Cloudflare; only the HTTP webhooks do.
 - `DIAL_TIMEOUT`, `ENABLE_VOICEMAIL`, `VOICEMAIL_MAX_SECONDS` — ring/voicemail.
 - `HUBSPOT_TOKEN` (optional) — enables caller matching.
 - `MENU_AUDIO_URL` (optional) — pre-recorded greeting, skips per-call TTS.
+- `AI_ASSISTANT_ID` (optional) — Telnyx AI Assistant id; enables the "press 4"
+  single-leg AI handoff. `AI_INTRO_AUDIO_URL` (optional) plays a pre-recorded
+  "connecting you…" clip instead of TTS before the `<Connect>`.
 - Business hours (optional): `ENFORCE_BUSINESS_HOURS`, `BUSINESS_TIMEZONE`,
   `BUSINESS_OPEN_HOUR`, `BUSINESS_CLOSE_HOUR`, `BUSINESS_DAYS` (Mon=0..Sun=6),
   `AFTER_HOURS_AGENTS`.
@@ -131,8 +180,31 @@ and assign your number to it.
 Python 3.11+, FastAPI, Pydantic Settings, httpx (async), cryptography (Ed25519),
 uvicorn. Keep everything async; never block the event loop in a webhook.
 
-## Cost cheat-sheet (2026)
+## Cost cheat-sheet (verified vs telnyx.com/pricing, May 2026)
 
-Plain inbound ~$0.005–0.01/min · AI minute $0.05–0.08/min (avoided) · transfer
-~$0.10 each · US number ~$1/mo · hosting $0–5/mo. The "free AI models" claim
-refers to *tokens*, not the metered AI minute.
+Per-leg billing — **every leg alive at once meters separately**. Two concurrent
+legs = charged twice.
+
+- **Voice, each leg:** $0.002/min + per-minute SIP-trunk fee (varies by
+  destination; see Telnyx's SIP price sheet). Inbound and outbound both.
+- **SIP interface:** $0.002/min (on-net is cheap, *not* free).
+- **SIP-REFER transfer surcharge:** **$0.10 per invocation** — applies ONLY to the
+  Call Control `transfer`/SIP-REFER command. **TeXML `<Dial>` does NOT incur it**
+  (it bridges a new leg, it doesn't REFER). This app uses `<Dial>`, so routine
+  IVR→agent handoffs are not surcharged. The fee can appear if the AI assistant
+  escalates to a human via REFER.
+- **AI Assistant (Conversational AI):** ~$0.05/min (STT + orchestration + native
+  TTS included) **on top of** the telephony leg; premium TTS / external LLM extra.
+- US number ~$1/mo · hosting $0–5/mo.
+
+Single-leg vs double-leg, same call:
+- Human via SIP agent: inbound leg + SIP leg ≈ $0.004/min while bridged, no
+  surcharge. PSTN fallback adds the trunk termination fee on the second leg.
+- AI via `<Connect>`: one inbound leg + ~$0.05/min AI. The trap to avoid is
+  `<Dial>`-to-AI = two concurrent legs (see "AI Assistant handoff").
+
+A ballpark 5-min IVR→SIP-agent call is ≈ $0.035 (two cheap legs, no surcharge);
+the same via AI is ≈ $0.275 (the AI minute dominates). Confirm exact per-area-code
+rates and whether any REFER surcharge applies on your first real invoice.
+
+The "free AI models" claim refers to *tokens*, not the metered AI minute.

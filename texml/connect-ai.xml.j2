@@ -1,0 +1,25 @@
+{#- Hands the caller to a Telnyx AI Assistant ON THE SAME call leg.
+
+    BILLING (why this isn't <Dial>): <Connect><AIAssistant> attaches the assistant
+    to the existing inbound leg. It does NOT originate a new outbound <Dial> leg,
+    so there is no second concurrent telephony leg and no $0.10-per-invocation
+    transfer fee. Only the AI minute (~$0.05/min) stacks on the one inbound leg.
+    Never reach the assistant via <Dial> to a number — that would run two metered
+    legs at once ("charged twice") plus the transfer fee.
+
+    The assistant's voice, greeting, instructions, and its own transfer-to-human
+    tool live on the AI Assistant resource (portal / AI Assistant API) and are
+    referenced here only by id — keep that config out of this XML.
+
+    Variables: assistant_id, voice, intro_audio_url (optional), intro_text. -#}
+<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+{%- if intro_audio_url %}
+  <Play>{{ intro_audio_url }}</Play>
+{%- elif intro_text %}
+  <Say voice="{{ voice }}">{{ intro_text }}</Say>
+{%- endif %}
+  <Connect>
+    <AIAssistant id="{{ assistant_id }}"/>
+  </Connect>
+</Response>

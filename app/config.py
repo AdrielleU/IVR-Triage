@@ -61,6 +61,19 @@ class Settings(BaseSettings):
     whisper_model: str = "base"          # tiny | base | small | medium
     recordings_dir: str = "recordings"
 
+    # AI Assistant (Telnyx Conversational AI), opt-in. When ai_assistant_id is set,
+    # the menu offers "press 4" to hand the caller to a Telnyx AI Assistant. The
+    # handoff uses TeXML <Connect><AIAssistant>, which runs the assistant ON THE
+    # EXISTING call leg — it does NOT originate a new <Dial> leg, so there's no
+    # second concurrent telephony leg and no $0.10/transfer fee; only the
+    # ~$0.05/min AI minute stacks on the single inbound leg. The assistant's
+    # voice, greeting, instructions, and its own transfer-to-human tool are
+    # configured on the assistant resource (Mission Control portal or the AI
+    # Assistant API) and referenced here ONLY by id. Per-company override:
+    # data/companies.csv `ai_assistant_id` column.
+    ai_assistant_id: str = ""
+    ai_intro_audio_url: str | None = None  # optional pre-recorded "connecting you…" clip; else TTS
+
     # Single-tenant defaults (used when data/companies.csv is absent or the dialed
     # number isn't listed). company_name personalizes the greeting; menu_audio_url
     # plays a pre-recorded greeting instead of TTS. Per-company values in

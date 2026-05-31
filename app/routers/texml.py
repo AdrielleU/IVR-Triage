@@ -41,6 +41,12 @@ DEPARTMENTS = {
 LABELS = {key: label for label, key in DEPARTMENTS.values()}
 LABELS["after_hours"] = "our on-call line"
 
+# DTMF digit that hands the caller to the AI Assistant. Handled separately from
+# DEPARTMENTS because the AI path is a <Connect> (assistant on the existing leg),
+# NOT a <Dial> (new leg + $0.10 transfer fee). Only offered when an assistant id
+# is configured for the tenant.
+AI_DIGIT = "4"
+
 
 def _render(template: str, **ctx) -> Response:
     """Render a texml/ template to a TeXML HTTP response."""
@@ -61,6 +67,22 @@ def _company_name(company: dict | None) -> str | None:
 
 def _menu_audio(company: dict | None) -> str | None:
     return (company.get("menu_audio_url") if company else None) or settings.menu_audio_url
+
+
+def _ai_assistant_id(company: dict | None) -> str:
+    """The tenant's Telnyx AI Assistant id, or "" if AI handoff isn't enabled."""
+    return (company.get("ai_assistant_id") if company else "") or settings.ai_assistant_id
+
+
+def _connect_ai(company: dict | None) -> Response:
+    """Attach the AI Assistant to the CURRENT leg. No new <Dial> leg, no $0.10
+    transfer fee — only the AI minute stacks on the single inbound leg."""
+    return _render(
+        "connect-ai.xml.j2",
+        assistant_id=_ai_assistant_id(company),
+        intro_audio_url=settings.ai_intro_audio_url,
+        intro_text="Connecting you to our virtual assistant. One moment please.",
+    )
 
 
 def _stages(company: dict | None, dept_key: str) -> list[list[str]]:
@@ -145,6 +167,7 @@ async def initial_menu(request: Request):
     return _render("menu.xml.j2", caller_name=contact["name"] if contact else None,
                    company_name=_company_name(company),
                    menu_audio_url=_menu_audio(company),
+                   ai_enabled=bool(_ai_assistant_id(company)),
                    announce_recording=settings.announce_recording)
 
 
@@ -156,6 +179,11 @@ async def handle_input(request: Request):
     company = get_company(To)
     co = normalize(To)
     log.info("Menu selection: digit=%s from=%s company=%r", digit, From, _company_name(company))
+
+    # AI handoff: <Connect> the assistant onto this leg instead of <Dial>ing out.
+    if digit == AI_DIGIT and _ai_assistant_id(company):
+        log.info("Connecting caller to AI assistant: from=%s company=%r", From, _company_name(company))
+        return _connect_ai(company)
 
     dept = DEPARTMENTS.get(digit)
     if dept is None:
