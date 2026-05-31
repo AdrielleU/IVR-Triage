@@ -466,6 +466,31 @@ as deployment assets, not source). Full details in [`audio/README.md`](audio/REA
 > Telephony tip: 8 kHz mono is plenty for phone audio and keeps files small.
 > `BASE_URL` must be your real public URL (not `localhost`) for `<Play>` to resolve.
 
+## Call history log (no database)
+
+The app logs every call event to stdout (`docker logs`), but those are ephemeral.
+For **durable, queryable history** — menu selections, routing outcomes, voicemails,
+abandonment — set **`LOG_CALLS=true`**. Each event is appended as one JSON object
+per line (JSON-Lines) to `CALL_LOG_PATH` (default `recordings/log-calls.jsonl`):
+
+```json
+{"ts":"2026-05-31T18:05:04+00:00","event":"incoming","call_sid":"…","label":"RAV","from":"+14155551234","to":"…","contact":"Jane Doe","detail":"vip"}
+{"ts":"2026-05-31T18:05:04+00:00","event":"selection","call_sid":"…","label":"RAV","detail":"sales"}
+{"ts":"2026-05-31T18:05:04+00:00","event":"dial","call_sid":"…","detail":"sales:stage0:no-answer"}
+{"ts":"2026-05-31T18:05:04+00:00","event":"voicemail","call_sid":"…","detail":"sales:17s"}
+```
+
+Events: `incoming`, `selection` (incl. `4:ai-assistant`, `<dept>:unavailable`,
+`<digit>:invalid`), `dial` (`<dept>:stage<n>:<status>`), `voicemail`, `direct`,
+`after_hours`. Group by `call_sid` to reconstruct a call's path; grep/import for
+reporting. It's append-safe and filesystem-only (no DB). Off by default; the file
+holds caller PII and is gitignored (lives under `recordings/`). Writes are
+best-effort — a logging failure is caught and never affects a live call.
+
+> Telnyx separately retains telephony **CDRs** (Mission Control → Reporting, or
+> the Detail Records API) — call legs, durations, cost — but not the *menu choice*
+> meaning, which only this log captures.
+
 ## Recording, transcription & storage (no database)
 
 - **Disclosure** — `ANNOUNCE_RECORDING=true` plays "this call may be recorded for

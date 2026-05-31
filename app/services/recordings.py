@@ -19,6 +19,7 @@ import csv
 import json
 import logging
 import re
+import threading
 from pathlib import Path
 
 import httpx
@@ -28,6 +29,7 @@ from app.config import settings
 log = logging.getLogger("ivr")
 
 _model = None  # lazily loaded faster-whisper model, reused across calls
+_index_lock = threading.Lock()  # serialize index.csv appends (this runs in a thread pool)
 
 
 def _get_model():
@@ -93,15 +95,18 @@ def process_recording(*, recording_url: str, call_sid: str, dept: str,
     }
     (day_dir / f"{base}.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
-    # One global index at the recordings/ root, with paths relative to it.
+    # One global index at the recordings/ root, with paths relative to it. process_recording
+    # runs in a thread pool, so several recordings can finish at once — the lock keeps the
+    # header check + append atomic so rows can't interleave or double-write the header.
     index = out / "index.csv"
-    write_header = not index.exists()
-    with index.open("a", newline="", encoding="utf-8") as fh:
-        writer = csv.writer(fh)
-        if write_header:
-            writer.writerow(["timestamp", "company", "dept", "caller", "call_sid",
-                             "duration_seconds", "audio_file", "transcript_file", "transcript"])
-        writer.writerow([stamp, company, dept, caller, call_sid, duration,
-                         audio_rel, transcript_rel, transcript])
+    with _index_lock:
+        write_header = not index.exists()
+        with index.open("a", newline="", encoding="utf-8") as fh:
+            writer = csv.writer(fh)
+            if write_header:
+                writer.writerow(["timestamp", "company", "dept", "caller", "call_sid",
+                                 "duration_seconds", "audio_file", "transcript_file", "transcript"])
+            writer.writerow([stamp, company, dept, caller, call_sid, duration,
+                             audio_rel, transcript_rel, transcript])
 
     log.info("Stored recording %s (transcript chars=%d)", audio_rel, len(transcript))

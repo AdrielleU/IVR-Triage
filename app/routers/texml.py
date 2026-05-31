@@ -11,6 +11,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from app.config import settings
 from app.security import verified_form
 from app.services.audio import prompt_audio
+from app.services.calllog import log_event
 from app.services.companies import get_company, normalize
 from app.services.contacts import lookup_caller
 from app.services.recordings import process_recording
@@ -74,6 +75,15 @@ def _company_label(company: dict | None) -> str:
     Sanitized to letters/digits and upper-cased; meant to be ~3 chars."""
     raw = (company.get("label") if company else "") or settings.company_label or ""
     return re.sub(r"[^A-Za-z0-9]", "", raw).upper()
+
+
+def _logc(event: str, company: dict | None, *, frm: str = "", to: str = "",
+          sid: str = "", contact: str | None = None, detail: str = "") -> None:
+    """Thin wrapper over log_event that fills in company name + label (no-op unless
+    LOG_CALLS is on; never raises)."""
+    log_event(event, call_sid=sid, company=_company_name(company) or "",
+              label=_company_label(company), from_number=frm, to_number=to,
+              contact=contact or "", detail=detail)
 
 
 def _menu_audio(company: dict | None, co: str = "") -> str | None:
@@ -220,6 +230,7 @@ async def initial_menu(request: Request):
 
     if not is_open():
         log.info("After-hours call: from=%s to=%s call_sid=%s", From, To, CallSid)
+        _logc("after_hours", company, frm=From, to=To, sid=CallSid)
         if _stages(company, "after_hours", co):
             return _dial_stage(company, "after_hours", 0, co, caller_number=From)
         return _render(
@@ -239,6 +250,8 @@ async def initial_menu(request: Request):
         contact = await lookup_caller(From)
         log.info("Direct line: from=%s to=%s company=%r -> auto-ring (no menu)",
                  From, To, _company_name(company))
+        _logc("direct", company, frm=From, to=To, sid=CallSid,
+              contact=contact["name"] if contact else None, detail="auto-ring")
         return _dial_stage(
             company, "direct", 0, co,
             caller_name=contact["name"] if contact else None, caller_number=From,
@@ -255,6 +268,9 @@ async def initial_menu(request: Request):
     else:
         log.info("Incoming call: from=%s to=%s company=%r -> no contact match",
                  From, To, _company_name(company))
+    _logc("incoming", company, frm=From, to=To, sid=CallSid,
+          contact=contact["name"] if contact else None,
+          detail=(contact.get("tier") or "known") if contact else "unknown")
 
     return _render("menu.xml.j2", caller_name=contact["name"] if contact else None,
                    company_name=_company_name(company),
@@ -268,6 +284,7 @@ async def handle_input(request: Request):
     """Route the caller to the right department based on their keypress."""
     form = await verified_form(request)
     digit, From, To = form.get("Digits", ""), form.get("From", ""), form.get("To", "")
+    CallSid = form.get("CallSid", "")
     company = get_company(To)
     co = normalize(To)
     log.info("Menu selection: digit=%s from=%s company=%r", digit, From, _company_name(company))
@@ -275,16 +292,21 @@ async def handle_input(request: Request):
     # AI handoff: <Connect> the assistant onto this leg instead of <Dial>ing out.
     if digit == AI_DIGIT and _ai_assistant_id(company):
         log.info("Connecting caller to AI assistant: from=%s company=%r", From, _company_name(company))
+        _logc("selection", company, frm=From, to=To, sid=CallSid, detail="4:ai-assistant")
         return _connect_ai(_ai_assistant_id(company))
 
     dept = DEPARTMENTS.get(digit)
     if dept is None:
+        _logc("selection", company, frm=From, to=To, sid=CallSid, detail=f"{digit or 'none'}:invalid")
         return _render("invalid.xml.j2", audio_url=prompt_audio("invalid", company, co))
 
     _, key = dept
     if not _stages(company, key, co):
         # Nobody configured for this option — take a message instead of dropping.
+        _logc("selection", company, frm=From, to=To, sid=CallSid, detail=f"{key}:unavailable")
         return _voicemail(company, key, co, template="unavailable.xml.j2")
+
+    _logc("selection", company, frm=From, to=To, sid=CallSid, detail=key)
 
     # Re-resolve the caller so the agent's phone shows "LABEL-GRP-Name". Local-CSV
     # first and mtime-cached, so this is essentially free and still off the path.
@@ -305,6 +327,8 @@ async def after_dial(request: Request):
     co = request.query_params.get("co", "") or normalize(form.get("To", ""))
     company = get_company(co)
     log.info("Dial finished: dept=%s stage=%s status=%s", dept_key, stage, status or "(none)")
+    _logc("dial", company, frm=form.get("From", ""), to=form.get("To", ""),
+          sid=form.get("CallSid", ""), detail=f"{dept_key}:stage{stage}:{status or 'none'}")
 
     if status == "completed":
         return _render("goodbye.xml.j2", audio_url=prompt_audio("goodbye", company, co))
@@ -319,13 +343,17 @@ async def voicemail_done(request: Request):
     """The caller finished recording. Telnyx includes the recording URL here."""
     form = await verified_form(request)
     co = request.query_params.get("co", "") or normalize(form.get("To", ""))
+    dept = request.query_params.get("dept", "")
+    company = get_company(co)
     log.info(
         "Voicemail left: dept=%s duration=%ss url=%s",
-        request.query_params.get("dept", ""),
+        dept,
         form.get("RecordingDuration", "?"),
         form.get("RecordingUrl", "?"),
     )
-    return _render("goodbye.xml.j2", audio_url=prompt_audio("goodbye", get_company(co), co))
+    _logc("voicemail", company, frm=form.get("From", ""), to=form.get("To", ""),
+          sid=form.get("CallSid", ""), detail=f"{dept}:{form.get('RecordingDuration', '?')}s")
+    return _render("goodbye.xml.j2", audio_url=prompt_audio("goodbye", company, co))
 
 
 @router.post("/recording")

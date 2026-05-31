@@ -192,7 +192,12 @@ and assign your number to it.
   name) + a top-level index.csv with relative paths — filesystem only, NO database.
   Transcription is local faster-whisper (optional dep, requirements-transcribe.txt),
   run via asyncio.to_thread off the request path. Best-effort: missing dep / download
-  failure is logged, audio still saved. recordings/ is gitignored (PII).
+  failure is logged, audio still saved. recordings/ is gitignored (PII). The index.csv
+  append is guarded by a threading.Lock (process_recording runs in a thread pool).
+- LOG_CALLS (opt-in) appends one JSON line per call event (incoming/selection/dial/
+  voicemail/direct/after_hours, keyed by call_sid) to CALL_LOG_PATH (default under
+  recordings/) via app/services/calllog.py — durable, queryable selection history.
+  JSON-Lines (append-safe, human-readable); best-effort writes never break a call.
 
 ## Resilience
 

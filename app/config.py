@@ -69,6 +69,14 @@ class Settings(BaseSettings):
     whisper_model: str = "base"          # tiny | base | small | medium
     recordings_dir: str = "recordings"
 
+    # Historical call log (opt-in). When log_calls is on, each call event
+    # (incoming, menu selection, dial outcome, voicemail, AI handoff) is appended
+    # as one JSON object per line to call_log_path — a human-readable, append-safe
+    # JSON-Lines file you can grep/import for reporting. Filesystem only, no DB.
+    # Defaults under recordings_dir, which is already writable + gitignored (PII).
+    log_calls: bool = False
+    call_log_path: str = "recordings/log-calls.jsonl"
+
     # AI Assistant (Telnyx Conversational AI), opt-in. When ai_assistant_id is set,
     # the menu offers "press 4" to hand the caller to a Telnyx AI Assistant. The
     # handoff uses TeXML <Connect><AIAssistant>, which runs the assistant ON THE
