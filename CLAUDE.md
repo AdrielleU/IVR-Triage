@@ -203,8 +203,10 @@ and assign your number to it.
   JSON-Lines (append-safe, human-readable); best-effort writes never break a call.
 
 Busy-prompt options: at the busy/voicemail prompt, `data/options.csv`
-(`app/services/options.py`, context "busy": company,context,digit,label,destination)
-offers "press <digit> for <label>". `/texml/vm-option` dispatches a press via
+(`app/services/options.py`, context "busy":
+company,context,department,digit,label,destination) offers "press <digit> for
+<label>". `department` scopes an option to one dept (blank = all); resolution is
+(company,dept)->(company,any)->(default,dept)->(default,any). `/texml/vm-option` dispatches a press via
 `_route_to`: a destination resolves to an AI assistant (`ai`/`assistant-…`), a
 department's ring chain, a raw PSTN/SIP dial, or `voicemail` (record). No options.csv
 -> default press-1->AI when an assistant is configured (else no options -> straight

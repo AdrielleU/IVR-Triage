@@ -141,11 +141,12 @@ def _assistant_for(dest: str, company: dict | None) -> str | None:
     return None
 
 
-def _busy_options(company: dict | None, co: str) -> list[dict]:
-    """Keypress options offered at the busy/voicemail prompt: from data/options.csv
-    (context "busy"), else a default of "press 1 -> AI" when an assistant is
-    configured, else none. Each is {digit, label, destination}."""
-    opts = get_options(co, "busy")
+def _busy_options(company: dict | None, co: str, dept: str = "") -> list[dict]:
+    """Keypress options offered at the busy/voicemail prompt for `dept`: from
+    data/options.csv (context "busy", department-specific then company-wide), else a
+    default of "press 1 -> AI" when an assistant is configured, else none. Each is
+    {digit, label, destination}."""
+    opts = get_options(co, "busy", dept)
     if opts:
         return opts
     if _ai_assistant_id(company):
@@ -258,7 +259,7 @@ def _voicemail(company: dict | None, dept_key: str, co: str,
     # <label>" options (data/options.csv, else default press-1->AI). Both the keypress
     # and the no-press timeout post back to /vm-option with this attempt index, which
     # bounds how many times the prompt repeats before the call is politely closed.
-    options = _busy_options(company, co) if offer_options else []
+    options = _busy_options(company, co, dept_key) if offer_options else []
     option_action = (f"{settings.base_url}/texml/vm-option?co={co}&dept={dept_key}&attempt={attempt}"
                      if options else "")
     return _render(
@@ -451,7 +452,7 @@ async def voicemail_option(request: Request):
     attempt = int(request.query_params.get("attempt", "1") or 1)
     company = get_company(co)
 
-    option = next((o for o in _busy_options(company, co) if o["digit"] == digit), None)
+    option = next((o for o in _busy_options(company, co, dept) if o["digit"] == digit), None)
     if option:
         log.info("Busy-prompt option: digit=%s -> %s from=%s company=%r",
                  digit, option["destination"], From, _company_name(company))

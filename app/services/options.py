@@ -1,20 +1,24 @@
 """Configurable keypress options for the busy / voicemail prompt (data/options.csv).
 
-One row per option: `company,context,digit,label,destination,active`. At the busy
-prompt the caller can "press <digit> for <label>" to route to <destination>
-instead of leaving a message; no keypress falls through to voicemail. Add more
+One row per option: `company,context,department,digit,label,destination,active`. At
+the busy prompt the caller can "press <digit> for <label>" to route to
+<destination> instead of leaving a message; no keypress falls through. Add more
 rows to offer more keys.
 
-- `context` — `busy` for now (the unavailable / no-answer voicemail prompt).
+- `context` — `busy` for now (the unavailable / no-answer prompt).
+- `department` — limit this option to one department (sales/support/billing/
+  operator); blank = applies to every department's busy prompt.
 - `digit`   — the DTMF key to press (avoid `#`, which ends a recording).
 - `label`   — spoken after "for …, press <digit>".
 - `destination` — `ai` (the tenant's configured assistant), an `assistant-…` id,
-  a department key (sales/support/billing/operator), a PSTN number, or a SIP URI.
+  a department key (rings that chain), a PSTN number, a SIP URI, or `voicemail`.
 - `company` blank = default/all tenants, else the dialed number (last-10 match).
 - `active`  — `false` benches a row without deleting it.
 
-Absent file / no rows -> the app falls back to its default (press 1 = AI when an
-assistant is configured). data/options.csv is gitignored; ship options.example.csv.
+Resolution is first-hit-wins, most specific first: (company, this dept) ->
+(company, any dept) -> (default, this dept) -> (default, any dept). Absent file /
+no match -> the app falls back to its default (press 1 = AI when an assistant is
+configured). data/options.csv is gitignored; ship options.example.csv.
 """
 
 import csv
@@ -34,7 +38,7 @@ def _truthy(value: str) -> bool:
 
 
 def _parse(path: Path) -> dict[str, dict[str, list[dict]]]:
-    """company_key -> context -> [ {digit, label, destination} ], sorted by digit."""
+    """company_key -> context -> [ {digit, label, destination, department} ], by digit."""
     index: dict[str, dict[str, list[dict]]] = {}
     with path.open(newline="", encoding="utf-8") as fh:
         for row in csv.DictReader(fh):
@@ -44,9 +48,12 @@ def _parse(path: Path) -> dict[str, dict[str, list[dict]]]:
             if not (digit and dest and ctx) or not _truthy(row.get("active", "true")):
                 continue  # skip blank/inactive rows rather than break a call
             co = normalize(row.get("company", ""))
-            index.setdefault(co, {}).setdefault(ctx, []).append(
-                {"digit": digit, "label": (row.get("label") or "").strip(), "destination": dest}
-            )
+            index.setdefault(co, {}).setdefault(ctx, []).append({
+                "digit": digit,
+                "label": (row.get("label") or "").strip(),
+                "destination": dest,
+                "department": (row.get("department") or "").strip().lower(),
+            })
     for contexts in index.values():
         for opts in contexts.values():
             opts.sort(key=lambda o: o["digit"])
@@ -55,10 +62,16 @@ def _parse(path: Path) -> dict[str, dict[str, list[dict]]]:
     return index
 
 
-def get_options(co: str, context: str) -> list[dict]:
-    """Active options for (company, context), preferring the dialed company then the
-    blank/default set. Empty list when none are configured."""
+def get_options(co: str, context: str, department: str = "") -> list[dict]:
+    """Active options for (company, context, department), first-hit-wins most
+    specific first. Empty list when none are configured."""
     index = load_cached(OPTIONS_FILE, _parse)
     if not index:
         return []
-    return index.get(co, {}).get(context) or index.get("", {}).get(context) or []
+    dept = (department or "").strip().lower()
+
+    def pick(company_key: str) -> list[dict]:
+        rows = index.get(company_key, {}).get(context) or []
+        return [o for o in rows if o["department"] == dept] or [o for o in rows if not o["department"]]
+
+    return pick(co) or pick("")

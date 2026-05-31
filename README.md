@@ -479,24 +479,28 @@ Controls:
   `audio/voicemail.mp3` clip — see *Recorded prompts* below.
 - **Configurable busy-prompt options (`data/options.csv`).** When a department is
   busy/unstaffed, the prompt can offer "for *X*, press 1; for *Y*, press 2…" before
-  falling through to voicemail. One row per option:
+  the fallback. One row per option:
   ```csv
-  company,context,digit,label,destination,active
-  ,busy,1,our virtual assistant,ai,true
-  ,busy,2,the operator,operator,true
-  ,busy,3,our answering service,+18005559999,true
+  company,context,department,digit,label,destination,active
+  ,busy,,1,our virtual assistant,ai,true
+  ,busy,,2,voicemail,voicemail,true
+  ,busy,billing,1,our virtual assistant,ai,true
   ```
-  A `destination` is `ai` (the configured assistant), an `assistant-…` id, a
-  **department** key (rings that chain), a **PSTN number**, a **SIP URI**, or
-  `voicemail` (leave a message). Press a configured key → it routes there.
-  **If the caller presses nothing**, the prompt repeats up to `BUSY_PROMPT_REPEATS`
-  times (default 2), then the call is **politely closed** ("Thank you for calling,
-  please call again." — `texml/closing.xml.j2`, or an `audio/closing.mp3` clip) and
-  hung up — so a silent/spam caller can't hold the line. To let callers leave a
-  message, give them a `voicemail` option (e.g. press 0). Add rows to add keys.
+  - **`department`** limits an option to one department (blank = all). So sales can
+    offer "press 1 AI / press 2 voicemail" while billing offers only "press 1 AI" —
+    resolution is most-specific first: (company, dept) → (company, any) → (default,
+    dept) → (default, any). *(Tip: to send a department **straight to AI** with no
+    prompt at all, don't use options — just make `ai` the last `routing.csv` stage
+    for it.)*
+  - **`destination`** is `ai` (the configured assistant), an `assistant-…` id, a
+    **department** key (rings that chain), a **PSTN number**, a **SIP URI**, or
+    `voicemail` (leave a message).
+  Press a configured key → it routes there. **No keypress** → the prompt repeats up
+  to `BUSY_PROMPT_REPEATS` times (default 2), then the department's `FALLBACK_ACTION`
+  (`voicemail` | `ai` | `close`). Digits are single-key (`numDigits=1`); avoid `#`.
   With no `options.csv`, the default is "press 1 = AI" when an assistant is
-  configured; a department with no options at all still records voicemail on no
-  answer as before. `options.csv` is gitignored — ship from `options.example.csv`.
+  configured; a department with no options at all just records voicemail on no
+  answer. `options.csv` is gitignored — ship from `options.example.csv`.
 
 Where messages go: Telnyx records and **stores every voicemail on Telnyx** (Portal
 → Reporting → Recordings, or via API). To also keep them locally with transcripts,
