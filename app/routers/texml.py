@@ -68,6 +68,14 @@ def _company_name(company: dict | None) -> str | None:
     return (company.get("name") if company else None) or (settings.company_name or None)
 
 
+def _company_label(company: dict | None) -> str:
+    """Short tenant code (e.g. "RAV") shown first in the agent's caller-ID display.
+    From companies.csv `label`, else the COMPANY_LABEL env default, else "".
+    Sanitized to letters/digits and upper-cased; meant to be ~3 chars."""
+    raw = (company.get("label") if company else "") or settings.company_label or ""
+    return re.sub(r"[^A-Za-z0-9]", "", raw).upper()
+
+
 def _menu_audio(company: dict | None, co: str = "") -> str | None:
     # Routed through prompt_audio so the menu greeting supports the same local-file
     # hosting / per-company convention as the other prompts (full URL still works).
@@ -117,12 +125,28 @@ def _stages(company: dict | None, dept_key: str, co: str = "") -> list[list[str]
 _DISPLAY_DISALLOWED = re.compile(r"[^A-Za-z0-9 \-_~!+]")
 
 
-def _from_display(dept_key: str, caller_name: str | None) -> str:
-    """Caller-ID display name the agent's softphone shows: "Sales - Jane Doe"
-    (or just "Sales" when the caller didn't match a contact). Sanitized to
-    Telnyx's allowed character set and capped at 128 chars."""
-    dept = dept_key.replace("_", " ").title()
-    raw = f"{dept} - {caller_name}" if caller_name else dept
+def _display_number(number: str) -> str:
+    """Caller number for the display name, minus the +/country-code noise:
+    "+15551234567" -> "5551234567". Keeps the local digits (drops a leading US
+    "1"); leaves shorter/foreign numbers as their bare digits."""
+    digits = re.sub(r"\D", "", number or "")
+    if len(digits) == 11 and digits.startswith("1"):
+        digits = digits[1:]
+    return digits
+
+
+def _from_display(company: dict | None, dept_key: str, caller_name: str | None,
+                  caller_number: str = "") -> str:
+    """Caller-ID display name the agent's softphone shows, formatted as
+    "LABEL-GRP-Who" — e.g. "RAV-SUP-Jane Doe", or "RAV-SUP-5551234567" when the
+    caller isn't in contacts. LABEL is the tenant code (omitted if unset), GRP is
+    the first 3 letters/digits of the department, and Who is the matched contact
+    name, falling back to the caller's number (country code stripped). Sanitized to
+    Telnyx's allowed charset (letters/digits/spaces and - _ ~ ! +), capped 128."""
+    label = _company_label(company)
+    grp = re.sub(r"[^A-Za-z0-9]", "", dept_key)[:3].upper()  # sales->SAL, after_hours->AFT
+    who = caller_name or _display_number(caller_number)
+    raw = "-".join(p for p in (label, grp, who) if p)
     return re.sub(r"\s+", " ", _DISPLAY_DISALLOWED.sub(" ", raw)).strip()[:128]
 
 
@@ -146,7 +170,7 @@ def _voicemail(company: dict | None, dept_key: str, co: str,
 
 
 def _dial_stage(company: dict | None, dept_key: str, stage: int, co: str,
-                caller_name: str | None = None,
+                caller_name: str | None = None, caller_number: str = "",
                 intro_audio_url: str | None = None,
                 intro_text: str | None = None) -> Response:
     """Ring the given stage's destinations; past the last stage -> voicemail.
@@ -154,9 +178,10 @@ def _dial_stage(company: dict | None, dept_key: str, stage: int, co: str,
     The <Dial> action points back at /texml/after-dial with the stage and the
     company key (`co`), so a no-answer fails over to the next stage for the right
     company even if the callback omits the dialed number. caller_name (matched in
-    the CRM) is shown to the agent as the SIP caller-ID display name. intro_audio_url
-    / intro_text override the default "Connecting you to <dept>" line — used by a
-    direct line to play its own greeting before auto-ringing.
+    the CRM) and caller_number form the agent's SIP caller-ID display name
+    ("LABEL-GRP-Who"). intro_audio_url / intro_text override the default
+    "Connecting you to <dept>" line — used by a direct line to play its own
+    greeting before auto-ringing.
     """
     stages = _stages(company, dept_key, co)
     if stage >= len(stages):
@@ -174,7 +199,7 @@ def _dial_stage(company: dict | None, dept_key: str, stage: int, co: str,
         department=LABELS.get(dept_key, "us"),
         destinations=stages[stage],
         dial_timeout=settings.dial_timeout,
-        from_display=_from_display(dept_key, caller_name),
+        from_display=_from_display(company, dept_key, caller_name, caller_number),
         action_url=f"{settings.base_url}/texml/after-dial?dept={dept_key}&stage={stage}&co={co}",
         record_calls=settings.record_calls,
         recording_callback=f"{settings.base_url}/texml/recording?dept={dept_key}&co={co}",
@@ -196,7 +221,7 @@ async def initial_menu(request: Request):
     if not is_open():
         log.info("After-hours call: from=%s to=%s call_sid=%s", From, To, CallSid)
         if _stages(company, "after_hours", co):
-            return _dial_stage(company, "after_hours", 0, co)
+            return _dial_stage(company, "after_hours", 0, co, caller_number=From)
         return _render(
             "after_hours.xml.j2",
             dept_key="after_hours",
@@ -216,7 +241,7 @@ async def initial_menu(request: Request):
                  From, To, _company_name(company))
         return _dial_stage(
             company, "direct", 0, co,
-            caller_name=contact["name"] if contact else None,
+            caller_name=contact["name"] if contact else None, caller_number=From,
             intro_audio_url=prompt_audio("menu", company, co),
             intro_text="Please hold while we connect you.",
         )
@@ -261,10 +286,11 @@ async def handle_input(request: Request):
         # Nobody configured for this option — take a message instead of dropping.
         return _voicemail(company, key, co, template="unavailable.xml.j2")
 
-    # Re-resolve the caller so the agent's phone shows "<Dept> - <Name>". Local-CSV
+    # Re-resolve the caller so the agent's phone shows "LABEL-GRP-Name". Local-CSV
     # first and mtime-cached, so this is essentially free and still off the path.
     contact = await lookup_caller(From)
-    return _dial_stage(company, key, 0, co, caller_name=contact["name"] if contact else None)
+    return _dial_stage(company, key, 0, co,
+                       caller_name=contact["name"] if contact else None, caller_number=From)
 
 
 @router.get("/after-dial")
@@ -284,7 +310,8 @@ async def after_dial(request: Request):
         return _render("goodbye.xml.j2", audio_url=prompt_audio("goodbye", company, co))
     contact = await lookup_caller(form.get("From", ""))
     return _dial_stage(company, dept_key, stage + 1, co,
-                       caller_name=contact["name"] if contact else None)
+                       caller_name=contact["name"] if contact else None,
+                       caller_number=form.get("From", ""))
 
 
 @router.post("/voicemail-done")

@@ -174,11 +174,19 @@ voicemail (<Record>)
 
 Destinations are SIP URIs or PSTN numbers; multiple in a stage ring simultaneously.
 
-**The agent sees who's calling.** When the caller matches a contact, the agent's
-softphone shows **`Sales - Jane Doe`** (department + name) as the caller-ID display
-name, while the caller's own number stays put for callback. No match → just the
-department (`Sales`). Works on the SIP/Linphone leg; a PSTN-fallback carrier may
-override the name. (Telnyx disallows `:` in this field, so the separator is `-`.)
+**The agent sees who's calling**, formatted as **`LABEL-GRP-Who`** on the
+softphone's caller-ID display — e.g. **`RAV-SUP-Jane Doe`**:
+- **`LABEL`** — the tenant code from the `label` column in `data/companies.csv`
+  (or the `COMPANY_LABEL` env default). ~3 letters/digits like `RAV` / `RV3`.
+  Omitted if unset.
+- **`GRP`** — the first 3 letters of the department (`SAL`, `SUP`, `BIL`, `OPE`,
+  `DIR` for a direct line).
+- **`Who`** — the caller's name if they match `data/contacts.csv`, otherwise their
+  **phone number** (country code stripped) as the fallback, e.g. `RAV-SUP-5551234567`.
+
+The caller's own number always stays as the callerId for callback. Works on the
+SIP/Linphone leg; a PSTN-fallback carrier may override the name. (Telnyx disallows
+`:` in this field, so the separators are `-`.)
 
 Where those destinations come from is resolved **first-hit-wins**:
 `data/routing.csv` (the agent roster, below) → `data/companies.csv` columns →

@@ -87,6 +87,10 @@ class Settings(BaseSettings):
     # plays a pre-recorded greeting instead of TTS. Per-company values in
     # companies.csv override these.
     company_name: str = ""
+    # Short tenant code (≈3 letters/digits, e.g. "RAV") shown first in the agent's
+    # incoming caller-ID display: "RAV-SUP-Jane Doe". Per-company override:
+    # companies.csv `label` column.
+    company_label: str = ""
     menu_audio_url: str | None = None
 
     # Pre-recorded prompt playback (optional). Each prompt can play a recorded
