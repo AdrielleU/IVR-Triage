@@ -184,7 +184,7 @@ def _from_display(company: dict | None, dept_key: str, caller_name: str | None,
 
 
 def _voicemail(company: dict | None, dept_key: str, co: str,
-               template: str = "voicemail.xml.j2") -> Response:
+               template: str = "voicemail.xml.j2", offer_ai: bool = False) -> Response:
     # The "no agents configured" case (unavailable.xml.j2) can have its own clip
     # ("all agents are busy, leave your name and number…"); if none is set it falls
     # back to the generic voicemail clip, then to TTS.
@@ -192,6 +192,12 @@ def _voicemail(company: dict | None, dept_key: str, co: str,
         audio_url = prompt_audio("unavailable", company, co) or prompt_audio("voicemail", company, co)
     else:
         audio_url = prompt_audio("voicemail", company, co)
+    # When offer_ai is set AND the tenant has an assistant configured, the prompt
+    # gathers a "press 1 for the AI assistant" option before falling through to the
+    # voicemail recording. ai_action is the endpoint that handles that keypress.
+    ai_action = ""
+    if offer_ai and _ai_assistant_id(company):
+        ai_action = f"{settings.base_url}/texml/vm-ai?co={co}&dept={dept_key}"
     return _render(
         template,
         department=LABELS.get(dept_key, "us"),
@@ -199,6 +205,7 @@ def _voicemail(company: dict | None, dept_key: str, co: str,
         co=co,
         max_seconds=settings.voicemail_max_seconds,
         audio_url=audio_url,
+        ai_action=ai_action,
     )
 
 
@@ -219,7 +226,7 @@ def _dial_stage(company: dict | None, dept_key: str, stage: int, co: str,
     stages = _stages(company, dept_key, co)
     if stage >= len(stages):
         if settings.enable_voicemail:
-            return _voicemail(company, dept_key, co)
+            return _voicemail(company, dept_key, co, offer_ai=True)
         return _render("goodbye.xml.j2", audio_url=prompt_audio("goodbye", company, co))
     # An AI-assistant destination is terminal: <Connect> it to THIS leg instead of
     # opening a new <Dial> leg. Give an assistant its own priority/stage; if a stage
@@ -349,7 +356,7 @@ async def handle_input(request: Request):
     if not _stages(company, key, co):
         # Nobody configured for this option — take a message instead of dropping.
         _logc("selection", company, frm=From, to=To, sid=CallSid, detail=f"{key}:unavailable")
-        return _voicemail(company, key, co, template="unavailable.xml.j2")
+        return _voicemail(company, key, co, template="unavailable.xml.j2", offer_ai=True)
 
     _logc("selection", company, frm=From, to=To, sid=CallSid, detail=key)
 
@@ -358,6 +365,24 @@ async def handle_input(request: Request):
     contact = await lookup_caller(From)
     return _dial_stage(company, key, 0, co,
                        caller_name=contact["name"] if contact else None, caller_number=From)
+
+
+@router.post("/vm-ai")
+async def voicemail_ai(request: Request):
+    """The caller pressed a key at the busy/voicemail prompt. Digit 1 -> hand off to
+    the AI assistant; anything else -> just take the message (record-only, so a wrong
+    key can't loop the prompt)."""
+    form = await verified_form(request)
+    digit, From, To = form.get("Digits", ""), form.get("From", ""), form.get("To", "")
+    co = request.query_params.get("co", "") or normalize(To)
+    dept = request.query_params.get("dept", "")
+    company = get_company(co)
+    if digit == "1" and _ai_assistant_id(company):
+        log.info("Voicemail prompt -> AI assistant: from=%s company=%r", From, _company_name(company))
+        _logc("vm_to_ai", company, frm=From, to=To, sid=form.get("CallSid", ""), detail=dept)
+        return _connect_ai(_ai_assistant_id(company))
+    # Any other key: take the message, without re-offering AI (avoids a keypress loop).
+    return _voicemail(company, dept, co, offer_ai=False)
 
 
 @router.get("/after-dial")

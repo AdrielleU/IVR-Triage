@@ -438,6 +438,11 @@ Controls:
 - `VOICEMAIL_MAX_SECONDS=120` — max message length (billed as plain telephony time).
 - To use a **recorded voicemail prompt** instead of TTS, drop an
   `audio/voicemail.mp3` clip — see *Recorded prompts* below.
+- **"Press 1 for the AI assistant" escape hatch.** When a department is busy/unstaffed
+  *and* an AI assistant is configured for the tenant, the busy and voicemail prompts
+  automatically add "…or press 1 to speak with our virtual assistant." Press 1 →
+  `<Connect><AIAssistant>`; no keypress → records as normal. It appears only when an
+  assistant is configured (no extra flag), and a non-1 key just records (no loop).
 
 Where messages go: Telnyx records and **stores every voicemail on Telnyx** (Portal
 → Reporting → Recordings, or via API). To also keep them locally with transcripts,
