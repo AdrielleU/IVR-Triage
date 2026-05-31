@@ -109,6 +109,12 @@ voicemail (<Record>)
 
 Destinations are SIP URIs or PSTN numbers; multiple in a stage ring simultaneously.
 
+**The agent sees who's calling.** When the caller matches a contact, the agent's
+softphone shows **`Sales - Jane Doe`** (department + name) as the caller-ID display
+name, while the caller's own number stays put for callback. No match → just the
+department (`Sales`). Works on the SIP/Linphone leg; a PSTN-fallback carrier may
+override the name. (Telnyx disallows `:` in this field, so the separator is `-`.)
+
 Where those destinations come from is resolved **first-hit-wins**:
 `data/routing.csv` (the agent roster, below) → `data/companies.csv` columns →
 the `*_AGENTS` / `*_FALLBACK` env vars. So you can adopt the roster gradually —

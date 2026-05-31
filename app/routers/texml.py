@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -108,6 +109,20 @@ def _stages(company: dict | None, dept_key: str, co: str = "") -> list[list[str]
     return [stage for stage in (agents, fallback) if stage]
 
 
+# Telnyx fromDisplayName allows only letters, digits, spaces and - _ ~ ! +
+# (no colon/parens). Strip anything else so the <Dial> isn't rejected.
+_DISPLAY_DISALLOWED = re.compile(r"[^A-Za-z0-9 \-_~!+]")
+
+
+def _from_display(dept_key: str, caller_name: str | None) -> str:
+    """Caller-ID display name the agent's softphone shows: "Sales - Jane Doe"
+    (or just "Sales" when the caller didn't match a contact). Sanitized to
+    Telnyx's allowed character set and capped at 128 chars."""
+    dept = dept_key.replace("_", " ").title()
+    raw = f"{dept} - {caller_name}" if caller_name else dept
+    return re.sub(r"\s+", " ", _DISPLAY_DISALLOWED.sub(" ", raw)).strip()[:128]
+
+
 def _voicemail(dept_key: str, co: str, template: str = "voicemail.xml.j2") -> Response:
     return _render(
         template,
@@ -118,12 +133,14 @@ def _voicemail(dept_key: str, co: str, template: str = "voicemail.xml.j2") -> Re
     )
 
 
-def _dial_stage(company: dict | None, dept_key: str, stage: int, co: str) -> Response:
+def _dial_stage(company: dict | None, dept_key: str, stage: int, co: str,
+                caller_name: str | None = None) -> Response:
     """Ring the given stage's destinations; past the last stage -> voicemail.
 
     The <Dial> action points back at /texml/after-dial with the stage and the
     company key (`co`), so a no-answer fails over to the next stage for the right
-    company even if the callback omits the dialed number.
+    company even if the callback omits the dialed number. caller_name (matched in
+    the CRM) is shown to the agent as the SIP caller-ID display name.
     """
     stages = _stages(company, dept_key, co)
     if stage >= len(stages):
@@ -139,6 +156,7 @@ def _dial_stage(company: dict | None, dept_key: str, stage: int, co: str) -> Res
         department=LABELS.get(dept_key, "us"),
         destinations=stages[stage],
         dial_timeout=settings.dial_timeout,
+        from_display=_from_display(dept_key, caller_name),
         action_url=f"{settings.base_url}/texml/after-dial?dept={dept_key}&stage={stage}&co={co}",
         record_calls=settings.record_calls,
         recording_callback=f"{settings.base_url}/texml/recording?dept={dept_key}&co={co}",
@@ -208,7 +226,10 @@ async def handle_input(request: Request):
         # Nobody configured for this option — take a message instead of dropping.
         return _voicemail(key, co, template="unavailable.xml.j2")
 
-    return _dial_stage(company, key, 0, co)
+    # Re-resolve the caller so the agent's phone shows "<Dept> - <Name>". Local-CSV
+    # first and mtime-cached, so this is essentially free and still off the path.
+    contact = await lookup_caller(From)
+    return _dial_stage(company, key, 0, co, caller_name=contact["name"] if contact else None)
 
 
 @router.get("/after-dial")
@@ -226,7 +247,9 @@ async def after_dial(request: Request):
 
     if status == "completed":
         return _render("goodbye.xml.j2")
-    return _dial_stage(company, dept_key, stage + 1, co)
+    contact = await lookup_caller(form.get("From", ""))
+    return _dial_stage(company, dept_key, stage + 1, co,
+                       caller_name=contact["name"] if contact else None)
 
 
 @router.post("/voicemail-done")

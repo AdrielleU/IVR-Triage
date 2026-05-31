@@ -98,7 +98,11 @@ autoescape protects against a caller name / company breaking the document.
 - `POST /texml/handle-input` — rings the chosen department's agents (`<Dial>` of
   SIP URIs and/or PSTN numbers from `<KEY>_agents`). Digit `4` is special: when
   an `ai_assistant_id` is configured it renders `connect-ai.xml.j2`
-  (`<Connect><AIAssistant>`) instead of dialing — assistant on the same leg.
+  (`<Connect><AIAssistant>`) instead of dialing — assistant on the same leg. The
+  caller is re-resolved via `lookup_caller` so the agent's softphone shows
+  `<Department> - <Name>` (CRM match) as the SIP caller-ID display name
+  (`<Dial fromDisplayName>`, sanitized to Telnyx's allowed charset — no colon);
+  the caller's own number stays as the callerId for callback. Same on failover.
 - `GET/POST /texml/after-dial` — post-dial: answered → goodbye; no-answer → voicemail.
 - `POST /texml/voicemail-done`, `POST /texml/recording` — voicemail capture + URL log.
 - `GET /health` — health check.
