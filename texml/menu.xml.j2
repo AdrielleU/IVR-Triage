@@ -1,12 +1,13 @@
 {#- Main IVR menu. Edit the wording / options freely; the next call uses it.
     Available variables: caller_name (or None), voice, base_url, menu_audio_url,
-    ai_enabled (offer the AI-assistant option), announce_recording. -#}
+    ai_enabled (offer the AI-assistant option), announce_recording, action_url
+    (handle-input URL carrying the invalid-attempt counter). -#}
 <?xml version="1.0" encoding="UTF-8"?>
 <Response>
 {%- if announce_recording %}
   <Say voice="{{ voice }}">This call may be recorded for quality and monitoring purposes.</Say>
 {%- endif %}
-  <Gather numDigits="1" timeout="7" action="{{ base_url }}/texml/handle-input" method="POST">
+  <Gather numDigits="1" timeout="7" action="{{ action_url or (base_url ~ '/texml/handle-input') }}" method="POST">
 {%- if menu_audio_url %}
     <Play>{{ menu_audio_url }}</Play>
 {%- else %}

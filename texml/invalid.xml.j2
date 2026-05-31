@@ -1,5 +1,6 @@
-{#- Caller pressed a key with no menu option. Re-prompts once; the menu's own
-    timeout caps any loop. Variables: voice, base_url, audio_url. -#}
+{#- Caller pressed a key with no menu option. Re-prompts the menu, carrying an
+    incremented attempt counter (menu_url) so the loop is capped after a few tries.
+    Variables: voice, base_url, audio_url, menu_url. -#}
 <?xml version="1.0" encoding="UTF-8"?>
 <Response>
 {%- if audio_url %}
@@ -7,5 +8,5 @@
 {%- else %}
   <Say voice="{{ voice }}">That was not a valid option.</Say>
 {%- endif %}
-  <Redirect>{{ base_url }}/texml/menu</Redirect>
+  <Redirect>{{ menu_url or (base_url ~ '/texml/menu') }}</Redirect>
 </Response>

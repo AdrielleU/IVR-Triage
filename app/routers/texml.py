@@ -51,6 +51,11 @@ LABELS["after_hours"] = "our on-call line"
 # is configured for the tenant.
 AI_DIGIT = "4"
 
+# Loop guard: an invalid keypress re-prompts the menu (Redirect), carrying an
+# ?attempt counter. After this many invalid tries we stop re-prompting and take a
+# message instead, so a caller mashing wrong keys can't loop the menu forever.
+MAX_MENU_ATTEMPTS = 3
+
 
 def _render(template: str, **ctx) -> Response:
     """Render a texml/ template to a TeXML HTTP response."""
@@ -287,6 +292,14 @@ async def initial_menu(request: Request):
             intro_text="Please hold while we connect you.",
         )
 
+    # Loop guard: too many invalid keypresses in a row -> stop re-prompting and
+    # take a message instead of looping the menu forever.
+    attempt = int(request.query_params.get("attempt", "0") or 0)
+    if attempt >= MAX_MENU_ATTEMPTS:
+        log.info("Menu giving up after %d invalid attempts: from=%s", attempt, From)
+        _logc("menu_giveup", company, frm=From, to=To, sid=CallSid, detail=str(attempt))
+        return _voicemail(company, "main", co)
+
     contact = await lookup_caller(From)
     if contact:
         log.info(
@@ -304,7 +317,8 @@ async def initial_menu(request: Request):
                    company_name=_company_name(company),
                    menu_audio_url=_menu_audio(company, co),
                    ai_enabled=bool(_ai_assistant_id(company)),
-                   announce_recording=settings.announce_recording)
+                   announce_recording=settings.announce_recording,
+                   action_url=f"{settings.base_url}/texml/handle-input?attempt={attempt}")
 
 
 @router.post("/handle-input")
@@ -313,6 +327,7 @@ async def handle_input(request: Request):
     form = await verified_form(request)
     digit, From, To = form.get("Digits", ""), form.get("From", ""), form.get("To", "")
     CallSid = form.get("CallSid", "")
+    attempt = int(request.query_params.get("attempt", "0") or 0)
     company = get_company(To)
     co = normalize(To)
     log.info("Menu selection: digit=%s from=%s company=%r", digit, From, _company_name(company))
@@ -326,7 +341,9 @@ async def handle_input(request: Request):
     dept = DEPARTMENTS.get(digit)
     if dept is None:
         _logc("selection", company, frm=From, to=To, sid=CallSid, detail=f"{digit or 'none'}:invalid")
-        return _render("invalid.xml.j2", audio_url=prompt_audio("invalid", company, co))
+        # Re-prompt, advancing the attempt counter so the menu loop is capped.
+        return _render("invalid.xml.j2", audio_url=prompt_audio("invalid", company, co),
+                       menu_url=f"{settings.base_url}/texml/menu?attempt={attempt + 1}")
 
     _, key = dept
     if not _stages(company, key, co):
