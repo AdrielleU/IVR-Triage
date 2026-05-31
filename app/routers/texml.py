@@ -9,6 +9,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from app.config import settings
 from app.security import verified_form
+from app.services.companies import get_company, normalize
 from app.services.contacts import lookup_caller
 from app.services.recordings import process_recording
 from app.services.schedule import is_open
@@ -49,47 +50,62 @@ def _render(template: str, **ctx) -> Response:
     return Response(content=xml, media_type="application/xml")
 
 
-def _stages(dept_key: str) -> list[list[str]]:
+def _split(raw: str) -> list[str]:
+    """Split a destinations cell on ; or , into a clean list."""
+    return [p.strip() for p in (raw or "").replace(";", ",").split(",") if p.strip()]
+
+
+def _company_name(company: dict | None) -> str | None:
+    return (company.get("name") if company else None) or (settings.company_name or None)
+
+
+def _menu_audio(company: dict | None) -> str | None:
+    return (company.get("menu_audio_url") if company else None) or settings.menu_audio_url
+
+
+def _stages(company: dict | None, dept_key: str) -> list[list[str]]:
     """Ordered ring stages for a department: agents first, then PSTN fallback.
 
-    e.g. SALES_AGENTS=sip:a1,sip:a2 + SALES_FALLBACK=+1cell  ->  [[a1, a2], [+1cell]]
-    Empty stages are dropped, so a department with no fallback is just [[a1, a2]].
+    Per-company values come from companies.csv; if no company matched the dialed
+    number, fall back to the single-tenant env config (<KEY>_agents/_fallback).
     """
-    stages: list[list[str]] = []
-    for suffix in ("agents", "fallback"):
-        raw = getattr(settings, f"{dept_key}_{suffix}", "") or ""
-        dests = [item.strip() for item in raw.split(",") if item.strip()]
-        if dests:
-            stages.append(dests)
-    return stages
+    if company is not None:
+        agents = _split(company.get(f"{dept_key}_agents", ""))
+        fallback = _split(company.get(f"{dept_key}_fallback", ""))
+    else:
+        agents = _split(getattr(settings, f"{dept_key}_agents", "") or "")
+        fallback = _split(getattr(settings, f"{dept_key}_fallback", "") or "")
+    return [stage for stage in (agents, fallback) if stage]
 
 
-def _voicemail(dept_key: str, template: str = "voicemail.xml.j2") -> Response:
+def _voicemail(dept_key: str, co: str, template: str = "voicemail.xml.j2") -> Response:
     return _render(
         template,
         department=LABELS.get(dept_key, "us"),
         dept_key=dept_key,
+        co=co,
         max_seconds=settings.voicemail_max_seconds,
     )
 
 
-def _dial_stage(dept_key: str, stage: int) -> Response:
+def _dial_stage(company: dict | None, dept_key: str, stage: int, co: str) -> Response:
     """Ring the given stage's destinations; past the last stage -> voicemail.
 
-    The <Dial> action points back at /texml/after-dial with this stage number, so
-    a no-answer (SIP offline, busy, timeout) fails over to the next stage.
+    The <Dial> action points back at /texml/after-dial with the stage and the
+    company key (`co`), so a no-answer fails over to the next stage for the right
+    company even if the callback omits the dialed number.
     """
-    stages = _stages(dept_key)
+    stages = _stages(company, dept_key)
     if stage >= len(stages):
-        return _voicemail(dept_key) if settings.enable_voicemail else _render("goodbye.xml.j2")
+        return _voicemail(dept_key, co) if settings.enable_voicemail else _render("goodbye.xml.j2")
     return _render(
         "transfer.xml.j2",
         department=LABELS.get(dept_key, "us"),
         destinations=stages[stage],
         dial_timeout=settings.dial_timeout,
-        action_url=f"{settings.base_url}/texml/after-dial?dept={dept_key}&stage={stage}",
+        action_url=f"{settings.base_url}/texml/after-dial?dept={dept_key}&stage={stage}&co={co}",
         record_calls=settings.record_calls,
-        recording_callback=f"{settings.base_url}/texml/recording?dept={dept_key}",
+        recording_callback=f"{settings.base_url}/texml/recording?dept={dept_key}&co={co}",
     )
 
 
@@ -100,14 +116,17 @@ async def initial_menu(request: Request):
     that's how we "see" the caller, for free, with no AI."""
     form = await verified_form(request)
     From, To, CallSid = form.get("From", ""), form.get("To", ""), form.get("CallSid", "")
+    company = get_company(To)          # which company was dialed (None -> env defaults)
+    co = normalize(To)                 # company key carried through callbacks
 
     if not is_open():
         log.info("After-hours call: from=%s to=%s call_sid=%s", From, To, CallSid)
-        if _stages("after_hours"):
-            return _dial_stage("after_hours", 0)
+        if _stages(company, "after_hours"):
+            return _dial_stage(company, "after_hours", 0, co)
         return _render(
             "after_hours.xml.j2",
             dept_key="after_hours",
+            co=co,
             max_seconds=settings.voicemail_max_seconds,
             open_hour=settings.business_open_hour,
             close_hour=settings.business_close_hour,
@@ -116,14 +135,16 @@ async def initial_menu(request: Request):
     contact = await lookup_caller(From)
     if contact:
         log.info(
-            "Incoming call: from=%s call_sid=%s -> KNOWN name=%r company=%r tier=%r",
-            From, CallSid, contact["name"], contact["company"], contact.get("tier"),
+            "Incoming call: from=%s to=%s company=%r -> KNOWN name=%r tier=%r",
+            From, To, _company_name(company), contact["name"], contact.get("tier"),
         )
     else:
-        log.info("Incoming call: from=%s call_sid=%s -> no contact match", From, CallSid)
+        log.info("Incoming call: from=%s to=%s company=%r -> no contact match",
+                 From, To, _company_name(company))
 
     return _render("menu.xml.j2", caller_name=contact["name"] if contact else None,
-                   menu_audio_url=settings.menu_audio_url,
+                   company_name=_company_name(company),
+                   menu_audio_url=_menu_audio(company),
                    announce_recording=settings.announce_recording)
 
 
@@ -131,19 +152,21 @@ async def initial_menu(request: Request):
 async def handle_input(request: Request):
     """Route the caller to the right department based on their keypress."""
     form = await verified_form(request)
-    digit, From = form.get("Digits", ""), form.get("From", "")
-    log.info("Menu selection: digit=%s from=%s", digit, From)
+    digit, From, To = form.get("Digits", ""), form.get("From", ""), form.get("To", "")
+    company = get_company(To)
+    co = normalize(To)
+    log.info("Menu selection: digit=%s from=%s company=%r", digit, From, _company_name(company))
 
     dept = DEPARTMENTS.get(digit)
     if dept is None:
         return _render("invalid.xml.j2")
 
     _, key = dept
-    if not _stages(key):
+    if not _stages(company, key):
         # Nobody configured for this option — take a message instead of dropping.
-        return _voicemail(key, template="unavailable.xml.j2")
+        return _voicemail(key, co, template="unavailable.xml.j2")
 
-    return _dial_stage(key, 0)
+    return _dial_stage(company, key, 0, co)
 
 
 @router.get("/after-dial")
@@ -155,11 +178,13 @@ async def after_dial(request: Request):
     status = form.get("DialCallStatus", "")
     dept_key = request.query_params.get("dept", "support")
     stage = int(request.query_params.get("stage", "0") or 0)
+    co = request.query_params.get("co", "") or normalize(form.get("To", ""))
+    company = get_company(co)
     log.info("Dial finished: dept=%s stage=%s status=%s", dept_key, stage, status or "(none)")
 
     if status == "completed":
         return _render("goodbye.xml.j2")
-    return _dial_stage(dept_key, stage + 1)
+    return _dial_stage(company, dept_key, stage + 1, co)
 
 
 @router.post("/voicemail-done")
@@ -184,7 +209,9 @@ async def recording(request: Request):
     form = await verified_form(request)
     url = form.get("RecordingUrl", "")
     dept = request.query_params.get("dept", "")
-    log.info("Recording ready: dept=%s url=%s", dept, url or "?")
+    co = request.query_params.get("co", "") or normalize(form.get("To", ""))
+    company = _company_name(get_company(co)) or ""
+    log.info("Recording ready: company=%r dept=%s url=%s", company, dept, url or "?")
 
     if url and (settings.save_recordings or settings.transcribe_enabled):
         # datetime.now is fine here (normal app code); to_thread keeps CPU-bound
@@ -196,6 +223,7 @@ async def recording(request: Request):
                 recording_url=url,
                 call_sid=form.get("CallSid", ""),
                 dept=dept,
+                company=company,
                 caller=form.get("From", ""),
                 duration=form.get("RecordingDuration", ""),
                 stamp=stamp,

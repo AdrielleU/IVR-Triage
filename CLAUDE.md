@@ -39,6 +39,13 @@ data/*.csv               # EDITABLE contacts.csv / hours.csv / holidays.csv (mti
 Dockerfile  docker-compose.yml  requirements.txt  README.md  .env.example
 ```
 
+Multi-tenant: one deployment serves many companies, keyed by the dialed number
+(`To`). `app/services/companies.py` resolves `To` -> a `data/companies.csv` row
+(name, menu_audio_url, per-dept agents/fallback); no match -> single-tenant env
+config. The company key (normalized digits) is threaded through callbacks as the
+`co` query param so after-dial/recording resolve the right tenant. Don't put the
+whole company row in URLs — re-resolve via `co`.
+
 Operational data lives in editable files, not code: `data/contacts.csv`
 (caller matching, last-10-digit match), `data/hours.csv` (weekly schedule).
 Public holidays are computed by the `holidays` lib (`HOLIDAY_COUNTRY`/`SUBDIV`,

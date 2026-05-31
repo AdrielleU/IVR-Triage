@@ -5,8 +5,8 @@
 <Response>
   <Say voice="{{ voice }}">Thanks for calling. Our office is currently closed. Our hours are {{ open_hour }} to {{ close_hour }}. Please leave a message after the beep and we'll get back to you.</Say>
   <Record maxLength="{{ max_seconds }}" finishOnKey="#" playBeep="true"
-          action="{{ base_url }}/texml/voicemail-done?dept={{ dept_key }}" method="POST"
-          recordingStatusCallback="{{ base_url }}/texml/recording?dept={{ dept_key }}" />
+          action="{{ base_url }}/texml/voicemail-done?dept={{ dept_key }}&amp;co={{ co }}" method="POST"
+          recordingStatusCallback="{{ base_url }}/texml/recording?dept={{ dept_key }}&amp;co={{ co }}" />
   <Say voice="{{ voice }}">We did not receive a message. Goodbye.</Say>
   <Hangup/>
 </Response>

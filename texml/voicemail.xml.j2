@@ -5,8 +5,8 @@
 <Response>
   <Say voice="{{ voice }}">Sorry, no one is available in {{ department }} right now. Please leave a message after the beep, then press pound or hang up.</Say>
   <Record maxLength="{{ max_seconds }}" finishOnKey="#" playBeep="true"
-          action="{{ base_url }}/texml/voicemail-done?dept={{ dept_key }}" method="POST"
-          recordingStatusCallback="{{ base_url }}/texml/recording?dept={{ dept_key }}" />
+          action="{{ base_url }}/texml/voicemail-done?dept={{ dept_key }}&amp;co={{ co }}" method="POST"
+          recordingStatusCallback="{{ base_url }}/texml/recording?dept={{ dept_key }}&amp;co={{ co }}" />
   <Say voice="{{ voice }}">We did not receive a message. Goodbye.</Say>
   <Hangup/>
 </Response>

@@ -30,6 +30,8 @@ wheels/
 # Caller data — may contain customer PII; keep out of version control.
 # (data/hours.csv and data/holidays.csv ARE tracked on purpose.)
 data/contacts.csv
+# Per-company routing (your internal agent numbers). Copy from companies.example.csv.
+data/companies.csv
 
 # Call/voicemail recordings + transcripts (customer PII) — keep the folder, not its contents.
 recordings/*

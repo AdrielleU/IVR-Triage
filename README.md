@@ -60,6 +60,26 @@ No code or restart needed — edit and the next call picks it up.
   `HOLIDAY_SUBDIV`) with correct floating/observed dates every year — no annual
   editing. Set `AUTO_HOLIDAYS=false` to rely solely on the CSV.
 
+## Multiple companies (one deployment, many numbers)
+
+Every webhook includes the dialed number (`To`), so one app + one Telnyx TeXML
+Application can serve many companies. Copy `data/companies.example.csv` →
+`data/companies.csv` and list each number:
+
+```csv
+number,name,menu_audio_url,sales_agents,support_agents,billing_agents,operator_agents,sales_fallback,...
++18005550001,Acme Inc,,sip:acme1@sip.telnyx.com;sip:acme2@sip.telnyx.com,sip:acme1@sip.telnyx.com,+1...,+1...,+1...
++18005550002,Globex,https://cdn/globex.mp3,sip:globex1@sip.telnyx.com,...
+```
+
+Each company gets its own greeting (its `name` in the TTS prompt, or its own
+`menu_audio_url` recording) and its own per-department agents/failover. Multiple
+agents in one cell are separated by `;`. A call to a listed number uses that
+company's row; an unlisted number falls back to the single-tenant `*_AGENTS` env
+vars. Recordings are tagged with the company (filename + `index.csv` column).
+Adding a company is a CSV edit — no redeploy. `data/companies.csv` is gitignored
+(internal routing); `companies.example.csv` is the template.
+
 ## Caller routing & failover
 
 Each option rings a stage of destinations, then fails over:

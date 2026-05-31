@@ -1,0 +1,3 @@
+number,name,menu_audio_url,sales_agents,support_agents,billing_agents,operator_agents,sales_fallback,support_fallback,billing_fallback,operator_fallback
++18005550001,Acme Inc,,sip:acme-sales@sip.telnyx.com;sip:acme-sales2@sip.telnyx.com,sip:acme-support@sip.telnyx.com,+14155550101,+14155550100,+14155559101,,,
++18005550002,Globex,https://your-cdn/globex-greeting.mp3,sip:globex1@sip.telnyx.com,sip:globex1@sip.telnyx.com,+14155550202,+14155550200,+14155559202,,,

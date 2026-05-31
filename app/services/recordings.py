@@ -46,7 +46,7 @@ def _safe(value: str) -> str:
 
 
 def process_recording(*, recording_url: str, call_sid: str, dept: str,
-                      caller: str, duration: str, stamp: str) -> None:
+                      caller: str, duration: str, stamp: str, company: str = "") -> None:
     """Download, optionally transcribe, and persist one recording. Thread-safe to
     call from asyncio.to_thread. Best-effort: any step failing is logged, not raised."""
     if not recording_url:
@@ -59,7 +59,7 @@ def process_recording(*, recording_url: str, call_sid: str, dept: str,
     day_dir = out / year / month / day
     day_dir.mkdir(parents=True, exist_ok=True)
 
-    base = f"{time_part}_{_safe(dept)}_{_safe(caller)}_{_safe(call_sid)}"
+    base = "_".join(_safe(p) for p in [time_part, company, dept, caller, call_sid] if p)
     rel_dir = f"{year}/{month}/{day}"  # stored in the index so files are findable
     audio_path = day_dir / f"{base}.mp3"
     txt_path = day_dir / f"{base}.txt"
@@ -85,8 +85,8 @@ def process_recording(*, recording_url: str, call_sid: str, dept: str,
     audio_rel = f"{rel_dir}/{audio_path.name}"
     transcript_rel = f"{rel_dir}/{txt_path.name}" if transcript else ""
     meta = {
-        "timestamp": stamp, "dept": dept, "caller": caller, "call_sid": call_sid,
-        "duration_seconds": duration, "recording_url": recording_url,
+        "timestamp": stamp, "company": company, "dept": dept, "caller": caller,
+        "call_sid": call_sid, "duration_seconds": duration, "recording_url": recording_url,
         "audio_file": audio_rel,
         "transcript_file": transcript_rel or None,
         "transcript": transcript,
@@ -99,9 +99,9 @@ def process_recording(*, recording_url: str, call_sid: str, dept: str,
     with index.open("a", newline="", encoding="utf-8") as fh:
         writer = csv.writer(fh)
         if write_header:
-            writer.writerow(["timestamp", "dept", "caller", "call_sid",
+            writer.writerow(["timestamp", "company", "dept", "caller", "call_sid",
                              "duration_seconds", "audio_file", "transcript_file", "transcript"])
-        writer.writerow([stamp, dept, caller, call_sid, duration,
+        writer.writerow([stamp, company, dept, caller, call_sid, duration,
                          audio_rel, transcript_rel, transcript])
 
     log.info("Stored recording %s (transcript chars=%d)", audio_rel, len(transcript))

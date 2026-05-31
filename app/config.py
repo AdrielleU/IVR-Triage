@@ -61,8 +61,11 @@ class Settings(BaseSettings):
     whisper_model: str = "base"          # tiny | base | small | medium
     recordings_dir: str = "recordings"
 
-    # Pre-recorded greeting URL (MP3/WAV). If set, the menu plays this instead of
-    # re-synthesizing TTS on every call (TTS is metered; a static <Play> is not).
+    # Single-tenant defaults (used when data/companies.csv is absent or the dialed
+    # number isn't listed). company_name personalizes the greeting; menu_audio_url
+    # plays a pre-recorded greeting instead of TTS. Per-company values in
+    # companies.csv override these.
+    company_name: str = ""
     menu_audio_url: str | None = None
 
     # Business hours. When enforce_business_hours is True, calls outside the
