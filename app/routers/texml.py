@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import re
 from datetime import datetime, timezone
@@ -15,7 +14,7 @@ from app.services.calllog import log_event
 from app.services.companies import get_company, normalize
 from app.services.contacts import lookup_caller
 from app.services.options import get_options
-from app.services.recordings import process_recording
+from app.services.recordings import enqueue_recording
 from app.services.routing import get_stages
 from app.services.schedule import is_open
 
@@ -569,22 +568,20 @@ async def recording(request: Request):
     log.info("Recording ready: company=%r dept=%s url=%s", company, dept, url or "?")
 
     if url and (settings.save_recordings or settings.transcribe_enabled):
-        # datetime.now is fine here (normal app code); to_thread keeps CPU-bound
-        # transcription off the event loop. RecordingId lets us delete the Telnyx
-        # copy after a successful local download (delete_telnyx_recording_after_download).
+        # Hand off to the single-worker recording queue: download + (optional)
+        # transcription run one-at-a-time off the request path, so a call burst can't
+        # spawn N concurrent CPU-bound transcriptions and starve the webhooks. The
+        # webhook returns 204 immediately; a backlog is logged, never silent.
         stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
-        asyncio.create_task(
-            asyncio.to_thread(
-                process_recording,
-                recording_url=url,
-                call_sid=form.get("CallSid", ""),
-                dept=dept,
-                company=company,
-                caller=form.get("From", ""),
-                duration=form.get("RecordingDuration", ""),
-                stamp=stamp,
-                recording_id=form.get("RecordingId", "") or form.get("recording_id", ""),
-            )
+        enqueue_recording(
+            recording_url=url,
+            call_sid=form.get("CallSid", ""),
+            dept=dept,
+            company=company,
+            caller=form.get("From", ""),
+            duration=form.get("RecordingDuration", ""),
+            stamp=stamp,
+            recording_id=form.get("RecordingId", "") or form.get("recording_id", ""),
         )
 
     return Response(status_code=204)

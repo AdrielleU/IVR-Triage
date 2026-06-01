@@ -18,6 +18,7 @@ thread off the request path, so it never blocks webhooks or the caller.
 import csv
 import json
 import logging
+import queue
 import re
 import threading
 from pathlib import Path
@@ -30,6 +31,68 @@ log = logging.getLogger("ivr")
 
 _model = None  # lazily loaded faster-whisper model, reused across calls
 _index_lock = threading.Lock()  # serialize index.csv appends (this runs in a thread pool)
+
+# ── Bounded single-worker queue for recording processing ─────────────────────
+# Transcription is CPU-bound (faster-whisper pins ~1 core) and must run one job at
+# a time, off the request path. Rather than spawning an unbounded thread per
+# recording (a call burst would thrash every core and starve the webhooks), jobs
+# go on a bounded queue drained by ONE worker thread. The webhook returns
+# instantly after enqueue; depth is logged so a backlog is visible, not silent.
+_QUEUE: "queue.Queue[dict]" = queue.Queue(maxsize=settings.transcription_queue_max)
+_worker_started = False
+_worker_lock = threading.Lock()
+# Warn once we cross this depth, then re-arm after it drains (avoid log spam).
+_BACKLOG_WARN_AT = max(5, settings.transcription_queue_max // 2)
+_backlog_warned = False
+
+
+def _worker_loop() -> None:
+    """Drain the recording queue one job at a time (serialized CPU use)."""
+    global _backlog_warned
+    while True:
+        job = _QUEUE.get()
+        try:
+            process_recording(**job)
+        except Exception as exc:  # noqa: BLE001 — a bad job must not kill the worker
+            log.warning("Recording job failed: %s", exc)
+        finally:
+            _QUEUE.task_done()
+            remaining = _QUEUE.qsize()
+            if remaining == 0 and _backlog_warned:
+                log.info("Transcription backlog cleared")
+                _backlog_warned = False
+
+
+def _ensure_worker() -> None:
+    global _worker_started
+    with _worker_lock:
+        if not _worker_started:
+            threading.Thread(target=_worker_loop, name="rec-worker", daemon=True).start()
+            _worker_started = True
+
+
+def enqueue_recording(**job) -> None:
+    """Hand a recording job to the background worker. Non-blocking: returns at once.
+
+    Acknowledges a backlog (logs depth) rather than silently piling up, and never
+    drops a recording — if the bounded queue is somehow full, it blocks the worker
+    backlog visibly via a warning and waits briefly so audio is never lost."""
+    global _backlog_warned
+    _ensure_worker()
+    depth = _QUEUE.qsize()
+    if depth >= _BACKLOG_WARN_AT and not _backlog_warned:
+        log.warning("Transcription backlog: %d jobs queued (worker is one-at-a-time; "
+                    "calls keep working, transcripts will lag)", depth + 1)
+        _backlog_warned = True
+    try:
+        _QUEUE.put_nowait(job)
+    except queue.Full:
+        # Extremely unlikely at real volume; block briefly so we never lose a
+        # recording, and make the saturation loud.
+        log.error("Transcription queue FULL (%d). Blocking to enqueue — consider a "
+                  "smaller WHISPER_MODEL or TRANSCRIBE_ENABLED=false on this box.",
+                  settings.transcription_queue_max)
+        _QUEUE.put(job, timeout=30)
 
 
 def _get_model():

@@ -84,6 +84,13 @@ class Settings(BaseSettings):
     whisper_model: str = "base"          # tiny | base | small | medium
     recordings_dir: str = "recordings"
 
+    # Recording/transcription runs on ONE background worker (CPU-bound, one at a
+    # time). This bounds how many recordings can wait in line; a call burst queues
+    # rather than spawning a thread per recording and thrashing the box. Webhooks
+    # never block on it; a backlog is logged, not silent. Raise if you record high
+    # volume and have spare disk; the worker just works through it.
+    transcription_queue_max: int = 100
+
     # After a recording is downloaded locally, DELETE the copy from Telnyx so you pay
     # $0 storage there (the recording minute itself, $0.002/min, is still billed —
     # that's Telnyx creating it, unavoidable). Only deletes when the local download
