@@ -3,41 +3,47 @@
 #   docker compose --profile tunnel up -d --build # app + Cloudflare Tunnel (TUNNEL_TOKEN in .env)
 #   docker compose logs -f ivr                   # watch call logs
 #
-# PODMAN + SELinux (e.g. RHEL/Fedora) users: bind mounts need an SELinux relabel
-# or the container gets "Permission denied" on data/. Either add `:z` to the
-# volume lines below (e.g. ./data:/app/data:ro,z) or run with the relabel done
-# for you. On plain Docker the `:z` suffix is a harmless no-op, so it's safe to
-# leave in. (`--userns=keep-id` is podman-only and NOT valid on Docker.)
+# PODMAN + SELinux (e.g. RHEL/Fedora) users — two things matter:
+#   1. Bind mounts need an SELinux relabel or the container gets "Permission denied"
+#      on data/. The `:z` suffix on the volume lines below does that (harmless no-op
+#      on plain Docker).
+#   2. Writing to ./recordings (voicemails, leads.csv, transcripts) needs the
+#      container's uid to map to the host user that owns the folder — hence
+#      `userns_mode: keep-id` below. Without it, rootless podman maps uid 1000 to a
+#      subuid and every write fails with EACCES. (`keep-id` is podman-only; on plain
+#      Docker, drop that line and instead `chown -R 1000 recordings` on the host.)
 #
-# VOLUMES — three things are mounted from the host so you can change them WITHOUT
-# rebuilding the image:
-#   ./texml       IVR / voicemail XML templates   (read-only; edit -> next call uses it)
-#   ./data        contacts.csv, hours.csv, holidays.csv  (read-only; edit/upload freely)
-#   ./recordings  saved audio + transcripts + index.csv  (read-write; the app writes here)
-#
-# These are "bind mounts" (a host folder mapped into the container) — the simplest
-# kind of local volume, and what you want here because you edit/read these files
-# directly on the host. A named-volume alternative for recordings is shown at the
-# bottom if you'd rather let Docker manage that storage.
+# VOLUMES — host folders mounted in so you change them WITHOUT rebuilding the image:
+#   ./app + ./main.py  application code   (edit + restart -> applies, no rebuild)
+#   ./texml            IVR / voicemail XML + dashboard templates (auto-reloaded)
+#   ./data             companies/routing/options/contacts/hours CSVs
+#   ./audio            pre-recorded prompt clips, served at /audio
+#   ./recordings       saved audio + transcripts + index.csv + leads.csv + call log (rw)
 
 services:
   ivr:
     build:
       context: .
-      # Bake in local transcription (faster-whisper) at build time:
-      # args:
-      #   INSTALL_TRANSCRIBE: "true"
+      # Bake in local faster-whisper transcription (TRANSCRIBE_ENABLED). Needed for
+      # the free, on-box transcripts; makes the image ~620MB instead of ~200MB.
+      args:
+        INSTALL_TRANSCRIBE: "true"
     env_file: .env
+    # Map the container's uid to the host user so writes to ./recordings succeed
+    # under rootless podman. Remove this line on plain Docker (see note above).
+    userns_mode: keep-id
     ports:
-      - "9395:8000"   # host 9395 -> container 8000 (8000 left free for other dev)
+      # host 9395 -> container 8000. 8000 is left free for other local dev. NOTE:
+      # this is the HOST mapping only; inside the compose network the app is reached
+      # as `ivr:8000` (the container port) — see the tunnel note below.
+      - "9395:8000"
     volumes:
-      - ./texml:/app/texml:ro          # templates  (ro = container can't modify them)
-      - ./data:/app/data:ro            # CSV data   (ro)
-      - ./audio:/app/audio:ro          # pre-recorded prompt clips, served at /audio (ro)
-      - ./recordings:/app/recordings   # recordings (rw — must be writable)
-      # If the app can't write to ./recordings (permission denied), the container
-      # user is uid 1000; either `chown -R 1000 recordings` on the host, or switch
-      # to the named volume shown at the bottom of this file.
+      - ./main.py:/app/main.py:ro,z    # app entrypoint (router includes live here)
+      - ./app:/app/app:ro,z            # application code (edit + restart, no rebuild)
+      - ./texml:/app/texml:ro,z        # templates (IVR XML + dashboard HTML)
+      - ./data:/app/data:ro,z          # CSV data
+      - ./audio:/app/audio:ro,z        # pre-recorded prompt clips
+      - ./recordings:/app/recordings:z # recordings/leads/log (rw — must be writable)
     restart: unless-stopped
     healthcheck:
       # Marks the container unhealthy if /health isn't 200 (it returns 503 when the
@@ -49,8 +55,9 @@ services:
       retries: 3
 
   # Optional: publish the app via Cloudflare Tunnel instead of opening a port.
-  # Create a tunnel in the Cloudflare Zero Trust dashboard, point its public
-  # hostname at http://ivr:8000, put its token in .env as TUNNEL_TOKEN, then:
+  # In the Cloudflare Zero Trust dashboard, set the tunnel's Public Hostname service
+  # to  http://ivr:8000  (the CONTAINER port over the compose network — NOT 9395,
+  # which is only the host mapping). Put the tunnel token in .env as TUNNEL_TOKEN.
   #   docker compose --profile tunnel up -d
   tunnel:
     image: cloudflare/cloudflared:latest

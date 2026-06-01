@@ -43,8 +43,10 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Telnyx Phone IVR",
-    version="1.0.0",
-    description="No-AI Telnyx IVR: DTMF menu, SIP ring-groups, voicemail, caller matching.",
+    version="1.1.0",
+    description=("Telnyx IVR: DTMF menu, SIP ring-groups, voicemail, caller matching, "
+                 "optional AI handoff, call recording + local transcription, lead capture, "
+                 "and a Cloudflare-Access-gated dashboard."),
     lifespan=lifespan,
 )
 
