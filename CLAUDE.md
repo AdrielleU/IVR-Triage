@@ -122,7 +122,10 @@ autoescape protects against a caller name / company breaking the document.
 - `POST /texml/handle-input` — rings the chosen department's agents (`<Dial>` of
   SIP URIs and/or PSTN numbers). Digit `4` is special: when an `ai_assistant_id` is
   configured it renders `connect-ai.xml.j2` (`<Connect><AIAssistant>`) instead of
-  dialing — assistant on the same leg. The caller is re-resolved via `lookup_caller`
+  dialing — assistant on the same leg. With no assistant configured, `4` degrades to
+  voicemail (not an "invalid key"): a recorded menu clip may bake in "press 4" since
+  `ai_enabled` only gates the spoken TTS menu, not a `<Play>`ed recording, so the caller
+  did what the audio said and gets to leave a message. The caller is re-resolved via `lookup_caller`
   so the agent's softphone shows **`LABEL-GRP-Who`** as the SIP caller-ID display
   name (`_from_display`: company `label`, first 3 letters of the dept, then the
   matched contact name else the caller's number with country code stripped;

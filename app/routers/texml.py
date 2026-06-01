@@ -443,10 +443,20 @@ async def handle_input(request: Request):
         )
 
     # AI handoff: <Connect> the assistant onto this leg instead of <Dial>ing out.
-    if digit == AI_DIGIT and _ai_assistant_id(company):
-        log.info("Connecting caller to AI assistant: from=%s company=%r", From, _company_name(company))
-        _logc("selection", company, frm=From, to=To, sid=CallSid, detail="4:ai-assistant")
-        return _connect_ai(_ai_assistant_id(company))
+    # A recorded menu clip may bake in "press 4" (ai_enabled only gates the TTS menu,
+    # not a <Play>ed recording), so a 4 with no assistant configured must NOT read as an
+    # invalid key — the caller did exactly what the recording said. Degrade to voicemail,
+    # matching every other unconfigured-AI path (_route_to, _fallback_response).
+    if digit == AI_DIGIT:
+        aid = _ai_assistant_id(company)
+        if aid:
+            log.info("Connecting caller to AI assistant: from=%s company=%r", From, _company_name(company))
+            _logc("selection", company, frm=From, to=To, sid=CallSid, detail="4:ai-assistant")
+            return _connect_ai(aid)
+        log.info("Press-4 AI but no assistant configured -> voicemail: from=%s company=%r",
+                 From, _company_name(company))
+        _logc("selection", company, frm=From, to=To, sid=CallSid, detail="4:ai-unavailable")
+        return _voicemail(company, "main", co)
 
     dept = DEPARTMENTS.get(digit)
     if dept is None:
