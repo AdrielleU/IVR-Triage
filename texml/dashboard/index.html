@@ -20,16 +20,31 @@
     [data-theme="light"] { --bg:#f6f7f9; --card:#ffffff; --line:#e2e5ea; --txt:#1a1d27; --mut:#5c6470; --acc:#2563eb; --hover:#eef1f5; }
     * { box-sizing:border-box; }
     body { margin:0; font:14px/1.5 system-ui,sans-serif; background:var(--bg); color:var(--txt); transition:background .15s,color .15s; }
-    header { padding:16px 24px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; gap:16px; }
-    header h1 { font-size:18px; margin:0; }
-    .right { display:flex; align-items:center; gap:14px; }
-    .who { color:var(--mut); font-size:13px; }
-    .theme-btn { background:var(--card); border:1px solid var(--line); color:var(--txt); width:34px; height:34px; border-radius:8px; cursor:pointer; font-size:16px; line-height:1; display:grid; place-items:center; }
-    .theme-btn:hover { border-color:var(--acc); }
-    .co-bar { display:flex; align-items:center; gap:8px; padding:12px 24px 0; }
-    .co-bar label { color:var(--mut); font-size:13px; }
-    .co-bar select { background:var(--card); color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:6px 10px; font-size:14px; cursor:pointer; }
-    .co-bar select:hover { border-color:var(--acc); }
+    header { padding:14px 24px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; gap:16px; background:var(--card); position:sticky; top:0; z-index:10; }
+    .brand { display:flex; align-items:center; gap:12px; min-width:0; }
+    .logo { width:38px; height:38px; border-radius:10px; background:linear-gradient(135deg,var(--acc),#7c5bff); display:grid; place-items:center; font-size:19px; flex:none; box-shadow:0 2px 8px rgba(0,0,0,.15); }
+    .brand .title { font-size:16px; font-weight:700; margin:0; line-height:1.2; }
+    .brand .subtitle { font-size:12px; color:var(--mut); }
+    .right { display:flex; align-items:center; gap:12px; }
+    .user { display:flex; align-items:center; gap:10px; background:var(--bg); border:1px solid var(--line); border-radius:999px; padding:4px 4px 4px 12px; }
+    .user .meta { display:flex; flex-direction:column; line-height:1.25; min-width:0; }
+    .user .email { font-size:13px; font-weight:600; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .user .sub { font-size:11px; color:var(--mut); }
+    .avatar { width:30px; height:30px; border-radius:50%; background:linear-gradient(135deg,var(--acc),#7c5bff); color:#fff; display:grid; place-items:center; font-size:13px; font-weight:700; flex:none; text-transform:uppercase; }
+    .role-pill { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; padding:2px 7px; border-radius:999px; background:color-mix(in srgb, var(--acc) 18%, transparent); color:var(--acc); }
+    .theme-btn { background:var(--bg); border:1px solid var(--line); color:var(--txt); width:36px; height:36px; border-radius:9px; cursor:pointer; font-size:16px; line-height:1; display:grid; place-items:center; transition:border-color .12s, background .12s; }
+    .theme-btn:hover { border-color:var(--acc); background:var(--hover); }
+    @media (max-width:640px){ .brand .subtitle, .user .sub { display:none; } .user .email { max-width:120px; } }
+    .controls { display:flex; align-items:center; gap:12px; padding:14px 24px 0; flex-wrap:wrap; }
+    .controls label { color:var(--mut); font-size:13px; }
+    .controls select { background:var(--card); color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:7px 10px; font-size:14px; cursor:pointer; }
+    .controls select:hover { border-color:var(--acc); }
+    .search { position:relative; flex:1; min-width:200px; max-width:420px; }
+    .search input { width:100%; background:var(--card); color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:8px 32px 8px 34px; font-size:14px; }
+    .search input:focus { outline:none; border-color:var(--acc); }
+    .search .icon { position:absolute; left:11px; top:50%; transform:translateY(-50%); color:var(--mut); font-size:14px; pointer-events:none; }
+    .search .clear { position:absolute; right:8px; top:50%; transform:translateY(-50%); background:none; border:none; color:var(--mut); cursor:pointer; font-size:16px; display:none; padding:2px 4px; }
+    .search .clear:hover { color:var(--txt); }
     .hidden-row { display:none; }
     .tabs { display:flex; gap:4px; padding:12px 24px 0; border-bottom:1px solid var(--line); }
     .tabs button { background:none; border:none; color:var(--mut); padding:10px 16px; cursor:pointer; border-bottom:2px solid transparent; font-size:14px; }
@@ -51,21 +66,38 @@
 </head>
 <body>
   <header>
-    <h1>📞 IVR Dashboard</h1>
+    <div class="brand">
+      <div class="logo">📞</div>
+      <div>
+        <div class="title">IVR Dashboard</div>
+        <div class="subtitle">{{ scope }}</div>
+      </div>
+    </div>
     <div class="right">
-      <div class="who">{{ email }} · <span class="tag">{{ role }}</span> · {{ scope }}</div>
+      <div class="user">
+        <div class="meta">
+          <span class="email">{{ email }}</span>
+          <span class="sub"><span class="role-pill">{{ role }}</span></span>
+        </div>
+        <div class="avatar">{{ email[0] if email else '?' }}</div>
+      </div>
       <button id="theme-btn" class="theme-btn" title="Toggle theme (system / light / dark)" aria-label="Toggle theme"></button>
     </div>
   </header>
-  {% if companies and companies|length > 1 %}
-  <div class="co-bar">
+  <div class="controls">
+    <div class="search">
+      <span class="icon">🔍</span>
+      <input id="search" type="search" placeholder="Search this tab…" autocomplete="off">
+      <button id="search-clear" class="clear" title="Clear" aria-label="Clear search">×</button>
+    </div>
+    {% if companies and companies|length > 1 %}
     <label for="co-select">Company:</label>
     <select id="co-select">
       <option value="*">All companies (combined)</option>
       {% for c in companies %}<option value="{{ c.key }}">{{ c.name }}</option>{% endfor %}
     </select>
+    {% endif %}
   </div>
-  {% endif %}
   <div class="tabs">
     <button data-tab="vm" class="active">Voicemails ({{ voicemails|length }})</button>
     <button data-tab="rec">Recordings ({{ recordings|length }})</button>
@@ -124,13 +156,51 @@
     </section>
   </main>
   <script>
+    // ----- Unified row filter: a row shows only if it passes BOTH the company
+    //       filter and the search text. Re-applied on tab switch, search, company. -----
+    var coSelect = document.getElementById('co-select');
+    var searchBox = document.getElementById('search');
+    var searchClear = document.getElementById('search-clear');
+
+    function coKey() { return coSelect ? coSelect.value : '*'; }
+    function query() { return (searchBox.value || '').trim().toLowerCase(); }
+
+    function applyFilters() {
+      var co = coKey(), q = query();
+      document.querySelectorAll('.panel').forEach(function (panel) {
+        panel.querySelectorAll('tbody tr').forEach(function (tr) {
+          var okCo = (co === '*') || (tr.getAttribute('data-ckey') === co);
+          var okQ = !q || tr.textContent.toLowerCase().indexOf(q) !== -1;
+          tr.classList.toggle('hidden-row', !(okCo && okQ));
+        });
+        // Show a "no matches" note per active panel when everything's filtered out.
+        var note = panel.querySelector('.no-match');
+        var anyVisible = panel.querySelector('tbody tr:not(.hidden-row)');
+        if (panel.querySelector('tbody')) {
+          if (!anyVisible && !note) {
+            note = document.createElement('div');
+            note.className = 'no-match empty';
+            note.textContent = 'No matches.';
+            panel.appendChild(note);
+          }
+          if (note) note.style.display = anyVisible ? 'none' : 'block';
+        }
+      });
+      searchClear.style.display = q ? 'block' : 'none';
+    }
+
     // ----- Tabs -----
     document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
       document.querySelectorAll('.tabs button').forEach(x => x.classList.remove('active'));
       document.querySelectorAll('.panel').forEach(x => x.classList.remove('active'));
       b.classList.add('active');
       document.getElementById(b.dataset.tab).classList.add('active');
+      applyFilters();
     });
+
+    // ----- Search -----
+    searchBox.addEventListener('input', applyFilters);
+    searchClear.onclick = function () { searchBox.value = ''; searchBox.focus(); applyFilters(); };
 
     // ----- Theme toggle: System -> Light -> Dark -> System ... -----
     // 'system' = no saved pref (follows OS); otherwise the user's explicit choice is
@@ -159,24 +229,19 @@
     apply(currentChoice());
 
     // ----- Company filter: combined (*) or one company; remembered per browser -----
-    var sel = document.getElementById('co-select');
-    if (sel) {
-      function applyCompany(key) {
-        document.querySelectorAll('tbody tr').forEach(function (tr) {
-          var show = (key === '*') || (tr.getAttribute('data-ckey') === key);
-          tr.classList.toggle('hidden-row', !show);
-        });
-      }
+    if (coSelect) {
       var savedCo = localStorage.getItem('ivr-company') || '*';
       // Only restore the saved company if it's still an option for this user.
-      if (![].some.call(sel.options, function (o) { return o.value === savedCo; })) savedCo = '*';
-      sel.value = savedCo;
-      applyCompany(savedCo);
-      sel.onchange = function () {
-        localStorage.setItem('ivr-company', sel.value);
-        applyCompany(sel.value);
+      if (![].some.call(coSelect.options, function (o) { return o.value === savedCo; })) savedCo = '*';
+      coSelect.value = savedCo;
+      coSelect.onchange = function () {
+        localStorage.setItem('ivr-company', coSelect.value);
+        applyFilters();
       };
     }
+
+    // Initial pass (applies restored company + empty search).
+    applyFilters();
   </script>
 </body>
 </html>
