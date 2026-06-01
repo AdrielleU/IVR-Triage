@@ -29,7 +29,7 @@ services:
       #   INSTALL_TRANSCRIBE: "true"
     env_file: .env
     ports:
-      - "8000:8000"
+      - "9395:8000"   # host 9395 -> container 8000 (8000 left free for other dev)
     volumes:
       - ./texml:/app/texml:ro          # templates  (ro = container can't modify them)
       - ./data:/app/data:ro            # CSV data   (ro)

@@ -52,6 +52,10 @@ LABELS["after_hours"] = "our on-call line"
 # is configured for the tenant.
 AI_DIGIT = "4"
 
+# DTMF key that replays the current prompt. Every recorded greeting/busy clip ends
+# with "press star to repeat", so * re-renders the menu (or busy prompt) in place.
+REPEAT_DIGIT = "*"
+
 # Loop guard: an invalid keypress re-prompts the menu (Redirect), carrying an
 # ?attempt counter. After this many invalid tries we stop re-prompting and take a
 # message instead, so a caller mashing wrong keys can't loop the menu forever.
@@ -162,6 +166,12 @@ def _route_to(company: dict | None, co: str, destination: str,
     aid = _assistant_for(destination, company)
     if aid:
         return _connect_ai(aid)
+    # An "ai"/"assistant" option with no assistant configured would otherwise build an
+    # empty <Dial> (dead air). Degrade to voicemail so the caller is never dropped —
+    # the recorded clip promises "press 1 for AI", so until an id is set, fall back.
+    if destination.strip().lower() in _AI_SENTINELS:
+        log.info("Busy-prompt AI option but no assistant configured -> voicemail (co=%s)", co)
+        return _voicemail(company, "main", co)
     if destination.strip().lower() in ("voicemail", "vm", "message"):
         return _voicemail(company, "main", co)  # explicit "leave a message" choice
     if _stages(company, destination, co):  # a department key with a configured chain
@@ -255,6 +265,12 @@ def _voicemail(company: dict | None, dept_key: str, co: str,
         audio_url = prompt_audio("unavailable", company, co) or prompt_audio("voicemail", company, co)
     else:
         audio_url = prompt_audio("voicemail", company, co)
+    # The "leave a message after the beep" step is a DIFFERENT moment than the busy
+    # prompt above: once a caller has chosen voicemail we shouldn't replay the
+    # "press 1 for AI…" busy clip. So the record step uses its own `leavemsg` clip
+    # (audio/<co>/leavemsg.wav or a leavemsg_audio_url column), falling back to TTS —
+    # never to the busy/voicemail clip.
+    record_audio_url = prompt_audio("leavemsg", company, co)
     # When offer_options is set, the prompt gathers configurable "press <digit> for
     # <label>" options (data/options.csv, else default press-1->AI). Both the keypress
     # and the no-press timeout post back to /vm-option with this attempt index, which
@@ -269,6 +285,7 @@ def _voicemail(company: dict | None, dept_key: str, co: str,
         co=co,
         max_seconds=settings.voicemail_max_seconds,
         audio_url=audio_url,
+        record_audio_url=record_audio_url,
         options=options,
         option_action=option_action,
     )
@@ -291,7 +308,9 @@ def _dial_stage(company: dict | None, dept_key: str, stage: int, co: str,
     stages = _stages(company, dept_key, co)
     if stage >= len(stages):
         if settings.enable_voicemail:
-            return _voicemail(company, dept_key, co, offer_options=True)
+            # A direct line records straight away (no press-1/press-2 busy menu);
+            # a department dead-end still offers the configured busy options.
+            return _voicemail(company, dept_key, co, offer_options=(dept_key != "direct"))
         return _render("goodbye.xml.j2", audio_url=prompt_audio("goodbye", company, co))
     # An AI-assistant destination is terminal: <Connect> it to THIS leg instead of
     # opening a new <Dial> leg. Give an assistant its own priority/stage; if a stage
@@ -333,6 +352,24 @@ async def initial_menu(request: Request):
     company = get_company(To)          # which company was dialed (None -> env defaults)
     co = normalize(To)                 # company key carried through callbacks
 
+    # Direct line (no IVR): a number with a `direct` ring chain configured skips the
+    # menu entirely — play its greeting, then auto-ring SIP -> personal line ->
+    # voicemail. A direct line is a personal number, so it rings 24/7 and is checked
+    # BEFORE the business-hours gate. A number without a `direct` chain falls through
+    # to the hours gate + menu below.
+    if _stages(company, "direct", co):
+        contact = await lookup_caller(From)
+        log.info("Direct line: from=%s to=%s company=%r -> auto-ring (no menu)",
+                 From, To, _company_name(company))
+        _logc("direct", company, frm=From, to=To, sid=CallSid,
+              contact=contact["name"] if contact else None, detail="auto-ring")
+        return _dial_stage(
+            company, "direct", 0, co,
+            caller_name=contact["name"] if contact else None, caller_number=From,
+            intro_audio_url=prompt_audio("menu", company, co),
+            intro_text="Please hold while we connect you.",
+        )
+
     if not is_open():
         log.info("After-hours call: from=%s to=%s call_sid=%s", From, To, CallSid)
         _logc("after_hours", company, frm=From, to=To, sid=CallSid)
@@ -346,22 +383,6 @@ async def initial_menu(request: Request):
             open_hour=settings.business_open_hour,
             close_hour=settings.business_close_hour,
             audio_url=prompt_audio("after_hours", company, co),
-        )
-
-    # Direct line (no IVR): a number with a `direct` ring chain configured skips the
-    # menu entirely — play its greeting, then auto-ring SIP -> personal line ->
-    # voicemail. A number without a `direct` chain falls through to the menu below.
-    if _stages(company, "direct", co):
-        contact = await lookup_caller(From)
-        log.info("Direct line: from=%s to=%s company=%r -> auto-ring (no menu)",
-                 From, To, _company_name(company))
-        _logc("direct", company, frm=From, to=To, sid=CallSid,
-              contact=contact["name"] if contact else None, detail="auto-ring")
-        return _dial_stage(
-            company, "direct", 0, co,
-            caller_name=contact["name"] if contact else None, caller_number=From,
-            intro_audio_url=prompt_audio("menu", company, co),
-            intro_text="Please hold while we connect you.",
         )
 
     # Loop guard: too many no-input/invalid menu attempts -> stop re-prompting and
@@ -410,6 +431,18 @@ async def handle_input(request: Request):
     co = normalize(To)
     log.info("Menu selection: digit=%s from=%s company=%r", digit, From, _company_name(company))
 
+    # "Press star to repeat this menu" (every recorded greeting offers it). Replay
+    # the menu WITHOUT advancing the attempt counter — repeating on request isn't a
+    # failed attempt, so it shouldn't count toward the no-input give-up cap.
+    if digit == REPEAT_DIGIT:
+        _logc("selection", company, frm=From, to=To, sid=CallSid, detail="*:repeat")
+        return Response(
+            content=f'<?xml version="1.0" encoding="UTF-8"?>\n<Response>'
+                    f'<Redirect>{settings.base_url}/texml/menu?attempt={attempt}</Redirect>'
+                    f'</Response>',
+            media_type="application/xml",
+        )
+
     # AI handoff: <Connect> the assistant onto this leg instead of <Dial>ing out.
     if digit == AI_DIGIT and _ai_assistant_id(company):
         log.info("Connecting caller to AI assistant: from=%s company=%r", From, _company_name(company))
@@ -452,6 +485,12 @@ async def voicemail_option(request: Request):
     dept = request.query_params.get("dept", "")
     attempt = int(request.query_params.get("attempt", "1") or 1)
     company = get_company(co)
+
+    # "Press star to repeat this message" (the busy clips offer it too). Re-play the
+    # busy prompt without advancing the repeat counter.
+    if digit == REPEAT_DIGIT:
+        _logc("vm_option", company, frm=From, to=To, sid=form.get("CallSid", ""), detail="*:repeat")
+        return _voicemail(company, dept, co, offer_options=True, attempt=attempt)
 
     option = next((o for o in _busy_options(company, co, dept) if o["digit"] == digit), None)
     if option:
@@ -531,7 +570,8 @@ async def recording(request: Request):
 
     if url and (settings.save_recordings or settings.transcribe_enabled):
         # datetime.now is fine here (normal app code); to_thread keeps CPU-bound
-        # transcription off the event loop.
+        # transcription off the event loop. RecordingId lets us delete the Telnyx
+        # copy after a successful local download (delete_telnyx_recording_after_download).
         stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
         asyncio.create_task(
             asyncio.to_thread(
@@ -543,6 +583,7 @@ async def recording(request: Request):
                 caller=form.get("From", ""),
                 duration=form.get("RecordingDuration", ""),
                 stamp=stamp,
+                recording_id=form.get("RecordingId", "") or form.get("recording_id", ""),
             )
         )
 

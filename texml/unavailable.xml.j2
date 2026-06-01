@@ -16,10 +16,10 @@
   </Gather>
   <Redirect>{{ option_action }}</Redirect>
 {%- else %}
-  {%- if audio_url %}
-  <Play>{{ audio_url }}</Play>
+  {%- if record_audio_url %}
+  <Play>{{ record_audio_url }}</Play>
   {%- else %}
-  <Say voice="{{ voice }}">Sorry, all of our agents are busy right now. Please leave a message with your name and number after the beep, and we'll call you back soon.</Say>
+  <Say voice="{{ voice }}">Please leave a message with your name and number after the beep, and we'll call you back soon.</Say>
   {%- endif %}
   <Record maxLength="{{ max_seconds }}" finishOnKey="#" playBeep="true"
           action="{{ base_url }}/texml/voicemail-done?dept={{ dept_key }}&amp;co={{ co }}" method="POST"

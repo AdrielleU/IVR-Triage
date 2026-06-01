@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
-from app.routers import texml
+from app.routers import dashboard, leads, texml
 
 log = logging.getLogger("ivr")
 TEMPLATE_DIR = Path(__file__).resolve().parent / "texml"
@@ -57,6 +57,8 @@ app.add_middleware(
 )
 
 app.include_router(texml.router, prefix="/texml", tags=["TeXML"])
+app.include_router(leads.router, tags=["Leads"])  # POST/GET /leads — AI lead capture
+app.include_router(dashboard.router, tags=["Dashboard"])  # /dashboard — Cloudflare-Access-gated viewer
 
 # Serve pre-recorded prompt clips so Telnyx can <Play> them over BASE_URL. Bind
 # audio_dir from the host (compose) to swap clips without a rebuild. Created if

@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>IVR Dashboard</title>
+  <script>
+    // Apply the saved/system theme BEFORE paint so there's no flash of the wrong mode.
+    (function () {
+      var saved = localStorage.getItem('ivr-theme');        // 'light' | 'dark' | null(system)
+      var sysDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      var mode = saved || (sysDark ? 'dark' : 'light');
+      document.documentElement.setAttribute('data-theme', mode);
+    })();
+  </script>
+  <style>
+    /* Dark is the default; [data-theme="light"] overrides the palette. Everything
+       else references the variables, so the whole UI re-themes from these. */
+    :root, [data-theme="dark"] { --bg:#0f1117; --card:#1a1d27; --line:#2a2e3a; --txt:#e6e8ee; --mut:#9aa0ac; --acc:#5b9dff; --hover:#1a1d27; }
+    [data-theme="light"] { --bg:#f6f7f9; --card:#ffffff; --line:#e2e5ea; --txt:#1a1d27; --mut:#5c6470; --acc:#2563eb; --hover:#eef1f5; }
+    * { box-sizing:border-box; }
+    body { margin:0; font:14px/1.5 system-ui,sans-serif; background:var(--bg); color:var(--txt); transition:background .15s,color .15s; }
+    header { padding:16px 24px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; gap:16px; }
+    header h1 { font-size:18px; margin:0; }
+    .right { display:flex; align-items:center; gap:14px; }
+    .who { color:var(--mut); font-size:13px; }
+    .theme-btn { background:var(--card); border:1px solid var(--line); color:var(--txt); width:34px; height:34px; border-radius:8px; cursor:pointer; font-size:16px; line-height:1; display:grid; place-items:center; }
+    .theme-btn:hover { border-color:var(--acc); }
+    .co-bar { display:flex; align-items:center; gap:8px; padding:12px 24px 0; }
+    .co-bar label { color:var(--mut); font-size:13px; }
+    .co-bar select { background:var(--card); color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:6px 10px; font-size:14px; cursor:pointer; }
+    .co-bar select:hover { border-color:var(--acc); }
+    .hidden-row { display:none; }
+    .tabs { display:flex; gap:4px; padding:12px 24px 0; border-bottom:1px solid var(--line); }
+    .tabs button { background:none; border:none; color:var(--mut); padding:10px 16px; cursor:pointer; border-bottom:2px solid transparent; font-size:14px; }
+    .tabs button.active { color:var(--txt); border-bottom-color:var(--acc); }
+    main { padding:24px; }
+    .panel { display:none; }
+    .panel.active { display:block; }
+    table { width:100%; border-collapse:collapse; }
+    th,td { text-align:left; padding:10px 12px; border-bottom:1px solid var(--line); vertical-align:top; }
+    th { color:var(--mut); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
+    tr:hover td { background:var(--hover); }
+    .empty { color:var(--mut); padding:40px; text-align:center; }
+    audio { height:32px; }
+    .tag { display:inline-block; background:var(--card); border:1px solid var(--line); border-radius:4px; padding:1px 7px; font-size:12px; color:var(--mut); }
+    .num { font-variant-numeric:tabular-nums; }
+    details summary { cursor:pointer; color:var(--acc); }
+    .yes { color:#4ade80; } .no { color:var(--mut); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>📞 IVR Dashboard</h1>
+    <div class="right">
+      <div class="who">{{ email }} · <span class="tag">{{ role }}</span> · {{ scope }}</div>
+      <button id="theme-btn" class="theme-btn" title="Toggle theme (system / light / dark)" aria-label="Toggle theme"></button>
+    </div>
+  </header>
+  {% if companies and companies|length > 1 %}
+  <div class="co-bar">
+    <label for="co-select">Company:</label>
+    <select id="co-select">
+      <option value="*">All companies (combined)</option>
+      {% for c in companies %}<option value="{{ c.key }}">{{ c.name }}</option>{% endfor %}
+    </select>
+  </div>
+  {% endif %}
+  <div class="tabs">
+    <button data-tab="vm" class="active">Voicemails ({{ voicemails|length }})</button>
+    <button data-tab="rec">Recordings ({{ recordings|length }})</button>
+    <button data-tab="leads">Leads ({{ leads|length }})</button>
+    <button data-tab="log">Call log ({{ calls|length }})</button>
+  </div>
+  <main>
+    <section id="vm" class="panel active">
+      {% if voicemails %}
+      <table><thead><tr><th>When</th><th>Company</th><th>From</th><th>Len</th><th>Play</th><th>Transcript</th></tr></thead><tbody>
+        {% for r in voicemails %}<tr data-ckey="{{ r.ckey }}">
+          <td class="num">{{ r.ts|replace('T',' ') }}</td><td>{{ r.company }}</td>
+          <td class="num">{{ r.caller }}</td><td class="num">{{ r.duration }}s</td>
+          <td>{% if r.audio %}<audio controls preload="none" src="/dashboard/audio/{{ r.audio }}"></audio>{% endif %}</td>
+          <td>{% if r.transcript %}<details><summary>view</summary>{{ r.transcript }}</details>{% else %}<span class="no">—</span>{% endif %}</td>
+        </tr>{% endfor %}
+      </tbody></table>
+      {% else %}<div class="empty">No voicemails yet.</div>{% endif %}
+    </section>
+
+    <section id="rec" class="panel">
+      {% if recordings %}
+      <table><thead><tr><th>When</th><th>Company</th><th>Dept</th><th>From</th><th>Len</th><th>Play</th><th>Transcript</th></tr></thead><tbody>
+        {% for r in recordings %}<tr data-ckey="{{ r.ckey }}">
+          <td class="num">{{ r.ts|replace('T',' ') }}</td><td>{{ r.company }}</td><td><span class="tag">{{ r.dept }}</span></td>
+          <td class="num">{{ r.caller }}</td><td class="num">{{ r.duration }}s</td>
+          <td>{% if r.audio %}<audio controls preload="none" src="/dashboard/audio/{{ r.audio }}"></audio>{% endif %}</td>
+          <td>{% if r.transcript %}<details><summary>view</summary>{{ r.transcript }}</details>{% else %}<span class="no">—</span>{% endif %}</td>
+        </tr>{% endfor %}
+      </tbody></table>
+      {% else %}<div class="empty">No recordings yet.</div>{% endif %}
+    </section>
+
+    <section id="leads" class="panel">
+      {% if leads %}
+      <table><thead><tr><th>When</th><th>Company</th><th>Name</th><th>Number</th><th>Intent</th><th>Issue</th><th>Callback?</th></tr></thead><tbody>
+        {% for r in leads %}<tr data-ckey="{{ r.ckey }}">
+          <td class="num">{{ r.ts|replace('T',' ') }}</td><td>{{ r.company }}</td><td>{{ r.caller_name }}</td>
+          <td class="num">{{ r.caller_number }}</td><td><span class="tag">{{ r.intent }}</span></td>
+          <td>{{ r.issue_summary }}</td>
+          <td>{% if r.wants_callback in ['yes','true','1','Yes'] %}<span class="yes">yes</span>{% else %}<span class="no">{{ r.wants_callback or '—' }}</span>{% endif %}</td>
+        </tr>{% endfor %}
+      </tbody></table>
+      {% else %}<div class="empty">No leads captured yet.</div>{% endif %}
+    </section>
+
+    <section id="log" class="panel">
+      {% if calls %}
+      <table><thead><tr><th>When</th><th>Event</th><th>Company</th><th>From</th><th>To</th><th>Detail</th></tr></thead><tbody>
+        {% for r in calls %}<tr data-ckey="{{ r.ckey }}">
+          <td class="num">{{ r.ts|replace('T',' ') }}</td><td><span class="tag">{{ r.event }}</span></td>
+          <td>{{ r.label or r.company }}</td><td class="num">{{ r['from'] }}</td><td class="num">{{ r.to }}</td><td>{{ r.detail }}</td>
+        </tr>{% endfor %}
+      </tbody></table>
+      {% else %}<div class="empty">No call events yet (LOG_CALLS).</div>{% endif %}
+    </section>
+  </main>
+  <script>
+    // ----- Tabs -----
+    document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
+      document.querySelectorAll('.tabs button').forEach(x => x.classList.remove('active'));
+      document.querySelectorAll('.panel').forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+      document.getElementById(b.dataset.tab).classList.add('active');
+    });
+
+    // ----- Theme toggle: System -> Light -> Dark -> System ... -----
+    // 'system' = no saved pref (follows OS); otherwise the user's explicit choice is
+    // saved in localStorage and survives reloads/other visits in this browser.
+    var btn = document.getElementById('theme-btn');
+    var ICON = { system: '🖥️', light: '☀️', dark: '🌙' };
+    function currentChoice() { return localStorage.getItem('ivr-theme') || 'system'; }
+    function systemMode() { return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; }
+    function apply(choice) {
+      var mode = (choice === 'system') ? systemMode() : choice;
+      document.documentElement.setAttribute('data-theme', mode);
+      btn.textContent = ICON[choice];
+      btn.title = 'Theme: ' + choice + ' (click to change)';
+    }
+    btn.onclick = function () {
+      var order = ['system', 'light', 'dark'];
+      var next = order[(order.indexOf(currentChoice()) + 1) % order.length];
+      if (next === 'system') localStorage.removeItem('ivr-theme');
+      else localStorage.setItem('ivr-theme', next);
+      apply(next);
+    };
+    // Live-update if the OS theme changes while on 'system'.
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () {
+      if (currentChoice() === 'system') apply('system');
+    });
+    apply(currentChoice());
+
+    // ----- Company filter: combined (*) or one company; remembered per browser -----
+    var sel = document.getElementById('co-select');
+    if (sel) {
+      function applyCompany(key) {
+        document.querySelectorAll('tbody tr').forEach(function (tr) {
+          var show = (key === '*') || (tr.getAttribute('data-ckey') === key);
+          tr.classList.toggle('hidden-row', !show);
+        });
+      }
+      var savedCo = localStorage.getItem('ivr-company') || '*';
+      // Only restore the saved company if it's still an option for this user.
+      if (![].some.call(sel.options, function (o) { return o.value === savedCo; })) savedCo = '*';
+      sel.value = savedCo;
+      applyCompany(savedCo);
+      sel.onchange = function () {
+        localStorage.setItem('ivr-company', sel.value);
+        applyCompany(sel.value);
+      };
+    }
+  </script>
+</body>
+</html>

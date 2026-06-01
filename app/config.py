@@ -84,6 +84,12 @@ class Settings(BaseSettings):
     whisper_model: str = "base"          # tiny | base | small | medium
     recordings_dir: str = "recordings"
 
+    # After a recording is downloaded locally, DELETE the copy from Telnyx so you pay
+    # $0 storage there (the recording minute itself, $0.002/min, is still billed —
+    # that's Telnyx creating it, unavoidable). Only deletes when the local download
+    # SUCCEEDED, so a failed pull never loses the only copy. Requires telnyx_api_key.
+    delete_telnyx_recording_after_download: bool = False
+
     # Historical call log (opt-in). When log_calls is on, each call event
     # (incoming, menu selection, dial outcome, voicemail, AI handoff) is appended
     # as one JSON object per line to call_log_path — a human-readable, append-safe
@@ -91,6 +97,14 @@ class Settings(BaseSettings):
     # Defaults under recordings_dir, which is already writable + gitignored (PII).
     log_calls: bool = False
     call_log_path: str = "recordings/log-calls.jsonl"
+
+    # Lead capture (POST /leads): the AI Assistant's "log lead" webhook tool appends
+    # a follow-up row (caller, intent, issue, wants-callback) to this CSV — your
+    # call-back list, openable in Excel. Default under recordings_dir (writable +
+    # gitignored, holds PII). leads_token, if set, is required as ?token=… on the
+    # endpoint so only your assistant (not the public internet) can post leads.
+    leads_csv_path: str = "recordings/leads.csv"
+    leads_token: str = ""
 
     # AI Assistant (Telnyx Conversational AI), opt-in. When ai_assistant_id is set,
     # the menu offers "press 4" to hand the caller to a Telnyx AI Assistant. The
@@ -150,6 +164,17 @@ class Settings(BaseSettings):
     # (e.g. healthchecks.io) alerts you. Complements an external uptime monitor.
     heartbeat_url: str | None = None
     heartbeat_interval_seconds: int = 60
+
+    # Dashboard auth (Cloudflare Access). The /dashboard pages are gated by
+    # Cloudflare Access (free, <=50 users) at the edge; the app verifies the signed
+    # Access JWT so the forwarded email can't be spoofed by hitting the origin
+    # directly. Set both to enable verification:
+    #   cf_access_team_domain : your team domain, e.g. "aiivar.cloudflareaccess.com"
+    #   cf_access_aud         : the Access application's Audience (AUD) tag
+    # Unset => dev mode: trusts the plain Cf-Access-Authenticated-User-Email header
+    # (only safe locally). Per-user company visibility is data/dashboard_access.csv.
+    cf_access_team_domain: str = ""
+    cf_access_aud: str = ""
 
     # Application
     base_url: str

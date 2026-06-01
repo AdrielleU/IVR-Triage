@@ -36,6 +36,8 @@ data/companies.csv
 data/routing.csv
 # Busy-prompt keypress options (your internal destinations). Copy from options.example.csv.
 data/options.csv
+# Dashboard access list (real user emails -> companies). Copy from dashboard_access.example.csv.
+data/dashboard_access.csv
 
 # Call/voicemail recordings + transcripts (customer PII) — keep the folder, not its contents.
 recordings/*

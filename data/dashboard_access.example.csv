@@ -1,0 +1,8 @@
+email,companies,role
+# Copy this to data/dashboard_access.csv and fill in your real users.
+# email     — the Cloudflare Access login (case-insensitive).
+# companies — "*" for all, else a ;-separated list of company keys
+#             (the dialed number's last 10 digits, matching companies.csv).
+# role      — "admin" (sees everything incl. the access list) or "viewer".
+admin@example.com,*,admin
+viewer@example.com,8005550001;8005550002,viewer

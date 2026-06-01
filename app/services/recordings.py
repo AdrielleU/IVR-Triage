@@ -47,10 +47,34 @@ def _safe(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9+]", "-", (value or "unknown"))[:40]
 
 
+def _delete_telnyx_recording(recording_id: str) -> None:
+    """Delete a recording from Telnyx (so it stops costing storage) once we have a
+    local copy. Best-effort: a failed delete is logged, never raised — worst case the
+    recording lingers on Telnyx at ~$0.006/GB/mo. Needs telnyx_api_key + recording_id."""
+    if not (recording_id and settings.telnyx_api_key):
+        if settings.delete_telnyx_recording_after_download and not settings.telnyx_api_key:
+            log.warning("delete_telnyx_recording_after_download is on but TELNYX_API_KEY is unset")
+        return
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            resp = client.delete(
+                f"https://api.telnyx.com/v2/recordings/{recording_id}",
+                headers={"Authorization": f"Bearer {settings.telnyx_api_key}"},
+            )
+            resp.raise_for_status()
+        log.info("Deleted Telnyx recording %s (local copy kept)", recording_id)
+    except Exception as exc:  # noqa: BLE001 — never let cleanup break anything
+        log.warning("Telnyx recording delete failed (%s): %s", recording_id, exc)
+
+
 def process_recording(*, recording_url: str, call_sid: str, dept: str,
-                      caller: str, duration: str, stamp: str, company: str = "") -> None:
+                      caller: str, duration: str, stamp: str, company: str = "",
+                      recording_id: str = "") -> None:
     """Download, optionally transcribe, and persist one recording. Thread-safe to
-    call from asyncio.to_thread. Best-effort: any step failing is logged, not raised."""
+    call from asyncio.to_thread. Best-effort: any step failing is logged, not raised.
+
+    If delete_telnyx_recording_after_download is on, deletes the Telnyx-side copy
+    once the local download succeeds (so storage there costs $0)."""
     if not recording_url:
         return
 
@@ -73,7 +97,11 @@ def process_recording(*, recording_url: str, call_sid: str, dept: str,
             audio_path.write_bytes(resp.content)
     except Exception as exc:  # noqa: BLE001
         log.warning("Recording download failed (%s): %s", recording_url, exc)
-        return
+        return  # download failed -> do NOT delete the Telnyx copy (it's the only one left)
+
+    # Local copy is safely on disk now; drop the Telnyx-side copy to avoid storage cost.
+    if settings.delete_telnyx_recording_after_download:
+        _delete_telnyx_recording(recording_id)
 
     transcript = ""
     if settings.transcribe_enabled:
